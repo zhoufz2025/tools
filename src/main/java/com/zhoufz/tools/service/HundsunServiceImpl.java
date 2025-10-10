@@ -9,7 +9,6 @@ import org.springframework.util.StringUtils;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -32,12 +31,42 @@ public class HundsunServiceImpl {
     public static List<String> HUI_LIST = Arrays.asList(
             "HUI1.0", "console-dxasset-vue", "console-dxfund-vue","console-dxtrust-vue");
 
-    public void replaceJavaFile() {
-        List<String> list = FileUtil.readFile();
+    public void gitReplaceSqlFile(String fileName) {
+        List<String> list = FileUtil.readFile(fileName);
         String sourcePrefix = list.get(0);
         String targetPrefix = list.get(1);
-        String scriptPrefix = list.get(2);
-        String vuePrefix = list.get(3);
+        String taskId = list.get(2);
+        String version = list.get(3);
+        taskId = taskId.substring(taskId.indexOf(":") + 1);
+        version = version.substring(version.indexOf(":") + 1);
+        File target;
+        File source;
+        try {
+            for (int i = 4; i < list.size(); i++) {
+                String readLine = list.get(i);
+                if (readLine.contains("spsql")) {
+                    String sourceVersion = readLine.substring(readLine.lastIndexOf("\\") + 1, readLine.lastIndexOf("\\") + 1 + "IFMS6.0V202506.00.000".length());
+                    target = new File(targetPrefix + readLine.replace(sourceVersion, version));
+                    source = new File(sourcePrefix + readLine);
+                    System.out.println(readLine.replace(sourceVersion, version));
+                    FileUtil.replaceSql(target, source, taskId);
+                }else{
+                    target = new File(targetPrefix + readLine);
+                    source = new File(sourcePrefix + readLine);
+                    System.out.println(targetPrefix + readLine);
+                    System.out.println(sourcePrefix + readLine);
+                    FileUtil.replace(target, source);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    
+    }
+    
+    public void svnReplaceSqlFile(String fileName) {
+        List<String> list = FileUtil.readFile(fileName);
+        String sourcePrefix = list.get(0), targetPrefix = list.get(1), scriptPrefix = list.get(2), vuePrefix = list.get(3);
         String taskId = list.get(4);
         taskId = taskId.substring(taskId.indexOf(":") + 1);
         File target;
@@ -45,14 +74,12 @@ public class HundsunServiceImpl {
         try {
             for (int i = 5; i < list.size(); i++) {
                 String readLine = list.get(i);
-                if (readLine.contains("lcpt-dxfund") || readLine.contains("lcpt-dxasset") ||
-                        readLine.contains("lcpt-dxtrust") || readLine.contains("lcpt-insure") ||
-                        readLine.contains("lcpt-pub")) {
-                    target = new File(targetPrefix + readLine.substring(readLine.indexOf("sale") + 4));
+                if (readLine.contains("lcpt-dxfund") || readLine.contains("lcpt-dxasset") || readLine.contains("lcpt-dxtrust") || readLine.contains("lcpt-insure") || readLine.contains("lcpt-pub")) {
+                    target = new File(targetPrefix + readLine.substring(readLine.indexOf("sale")+4));
                     if (sourcePrefix.contains("小包")) {
-                        source = new File(sourcePrefix + readLine.substring(readLine.indexOf("sale") + 4));
-                    } else {
-                        source = new File(sourcePrefix + readLine);
+                        source = new File(sourcePrefix+ readLine.substring(readLine.indexOf("sale")+4));
+                    }else {
+                        source = new File(sourcePrefix+ readLine);
                     }
                     FileUtil.replace(target, source);
                 }
@@ -71,16 +98,17 @@ public class HundsunServiceImpl {
                     }
                     String targetVersion = scriptPrefix.substring(scriptPrefix.lastIndexOf("\\")+1);
                     String sourceVersion = readLine.substring(readLine.lastIndexOf("\\")+1,readLine.lastIndexOf("\\")+1+"IFMS6.0V202506.00.000".length());
+                    System.out.println(readLine.replace(sourceVersion,targetVersion));
                     if (readLine.contains("pub")) {
                         target = new File(scriptPrefix + readLine.substring(readLine.indexOf("pub")-1).replace(sourceVersion,targetVersion));
-
+            
                         if (sourcePrefix.contains("小包")) {
                             source = new File(sourcePrefix+ readLine.substring(readLine.indexOf("pub")-1));
                         }else {
                             source = new File(sourcePrefix+ readLine);
                         }
-
-                        FileUtil.replaceSql(target, source, taskId);
+            
+                        FileUtil.replaceSql(target, source,taskId);
                     }
                     if (readLine.contains("trans")) {
                         target = new File(scriptPrefix + readLine.substring(readLine.indexOf("trans")-1).replace(sourceVersion,targetVersion));
@@ -105,23 +133,26 @@ public class HundsunServiceImpl {
                     FileUtil.replace(target, source);
                 }
                 if (readLine.contains("ifmcounter")){
+                    
                     if (sourcePrefix.contains("小包")) {
-                        source = new File(sourcePrefix+ readLine.substring(readLine.indexOf("sale")+4));
+                        String sourceFileName = readLine.replace(readLine.substring(readLine.indexOf("ifmcounter") + 11, readLine.indexOf("WebContent") - 1), "ifmcounter");
+    
+                        // System.out.println(sourcePrefix+ sourceFileName.substring(sourceFileName.indexOf("ifmcounter") + 10));
+                        source = new File(sourcePrefix+ sourceFileName.substring(sourceFileName.indexOf("ifmcounter") + 10));
                     }else {
                         source = new File(sourcePrefix+ readLine);
                     }
                     String targetFileName = readLine.replace(readLine.substring(readLine.indexOf("ifmcounter") + 11, readLine.indexOf("WebContent") - 1), "ifmcounter");
+                    // System.out.println(targetPrefix+targetFileName.substring(targetFileName.indexOf("ifmcounter") + 10));
                     target = new File(targetPrefix+targetFileName.substring(targetFileName.indexOf("ifmcounter") + 10));
                     FileUtil.replace(target, source);
                 }
-
-
             }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
-
-
+        catch (IOException e) {
+            e.printStackTrace();
+        }
+        
     }
 
     public void replaceSqlFile() {
@@ -232,12 +263,12 @@ public class HundsunServiceImpl {
     }
 
     private static void initGitSourcePath(String basePath) {
-        FileUtil.mkdir(Paths.get(basePath + "lcpt-server" + File.separator + "pub"));
-        FileUtil.mkdir(Paths.get(basePath + "lcpt-server" + File.separator + "sale"));
-        FileUtil.mkdir(Paths.get(basePath + "spsql"));
-        FileUtil.mkdir(Paths.get(basePath + "sql"));
-        FileUtil.mkdir(Paths.get(basePath + "lcpt-server"
-                + File.separator + "sale" + File.separator + "lcpt-web"));
+        // FileUtil.mkdir(Paths.get(basePath + "lcpt-server" + File.separator + "pub"));
+        // FileUtil.mkdir(Paths.get(basePath + "lcpt-server" + File.separator + "sale"));
+        // FileUtil.mkdir(Paths.get(basePath + "spsql"));
+        // FileUtil.mkdir(Paths.get(basePath + "sql"));
+        // FileUtil.mkdir(Paths.get(basePath + "lcpt-server"
+        //         + File.separator + "sale" + File.separator + "lcpt-web"));
 
     }
 

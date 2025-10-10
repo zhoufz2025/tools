@@ -5,6 +5,7 @@ import org.springframework.util.StringUtils;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,7 +13,6 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,9 +27,9 @@ public class FileUtil {
      * 读取resource下文件
      * @return
      */
-    public static List<String> readFile() {
+    public static List<String> readFile(String fileName) {
         // 通过类加载器获取资源
-        try (InputStream is = FileUtil.class.getClassLoader().getResourceAsStream("replaceFile.txt");
+        try (InputStream is = FileUtil.class.getClassLoader().getResourceAsStream(fileName);
              BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
             String line;
             List<String> list = new ArrayList<>();
@@ -53,42 +53,21 @@ public class FileUtil {
         }
         return null;
     }
-
-    public static List<String> readFile(String filePath) {
-        // 通过类加载器获取资源
-        try (
-             BufferedReader reader = new BufferedReader(new InputStreamReader(Files.newInputStream(Paths.get(filePath))))) {
-            String line;
-            List<String> list = new ArrayList<>();
-            while ((line = reader.readLine()) != null) {
-                if (line.trim().length() == 0) {
-                    continue;
-                }
-                if (line.contains("/") && !"/".equals(File.separator)) {
-                    line=line.replace("/", "\\");
-                }
-                if (line.contains("\\") && !"\\".equals(File.separator)) {
-                    line=line.replace("\\", "/");
-                }
-                list.add(line);
-            }
-            return list;
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return null;
-    }
-
     public static void replace(File target, File source) throws IOException {
-        if (target.exists()) {
-            Files.copy(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-        } else {
-            if (!target.getParentFile().exists()) {
-                mkdir(target.getParentFile().toPath());
-            }
-            Files.copy(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        // 确保源文件存在
+        if (!source.exists()) {
+            throw new FileNotFoundException("源文件不存在: " + source.getAbsolutePath());
         }
+        
+        // 如果目标文件的父目录不存在，逐级创建
+        File parentDir = target.getParentFile();
+        if (parentDir != null && !parentDir.exists()) {
+            if (!parentDir.mkdirs()) {
+                throw new IOException("无法创建目录: " + parentDir.getAbsolutePath());
+            }
+        }
+        // 复制文件
+        Files.copy(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
     }
 
     public static void replaceSql(File target, File source, String taskId) throws IOException {
@@ -105,7 +84,7 @@ public class FileUtil {
             try {
                 BufferedReader br = new BufferedReader(reader);
                 String readLine;
-
+                writer.write("\n");
                 while ((readLine = br.readLine()) != null) {
                     if (readLine.contains(taskId)) {
                         taskLineFlag = true;
@@ -117,7 +96,7 @@ public class FileUtil {
                     if (readLine.contains(taskId) && readLine.contains("end")) {
                         taskLineFlag = false;
                     }
-                    System.out.println(readLine);
+                    // System.out.println(readLine);
                 }
                 writer.flush();
                 br.close();
