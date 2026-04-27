@@ -7,12 +7,21 @@ import org.apache.logging.log4j.util.Strings;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -164,7 +173,7 @@ public class HundsunServiceImpl {
     }
 
 
-    public void saveConfigFile() {
+    public void saveConfigFile(String basePath) {
 
     }
 
@@ -349,6 +358,245 @@ public class HundsunServiceImpl {
 
     }
 
+    /**
+     * 递归查找所有Git仓库
+     * @param dir 要查找的目录
+     * @param repoPaths 用于存储找到的仓库路径
+     * @param maxDepth 最大递归深度（防止无限递归）
+     * @param currentDepth 当前递归深度
+     */
+    private void findGitRepositories(File dir, List<String> repoPaths, int maxDepth, int currentDepth) {
+        if (dir == null || !dir.exists() || !dir.isDirectory() || currentDepth > maxDepth) {
+            return;
+        }
+
+        // 检查当前目录是否是有效的git仓库
+        File gitDir = new File(dir, ".git");
+        if (gitDir.exists()) {
+            // 检查是否是有效的git仓库（有远程分支）
+            if (GitUtil.isValidGitRepository(dir.getAbsolutePath())) {
+                repoPaths.add(dir.getAbsolutePath());
+                System.out.println("找到Git仓库：" + dir.getAbsolutePath());
+                // 如果是有效的git仓库，不再递归子目录（避免处理嵌套的git仓库）
+                return;
+            } else {
+                // 如果是空的git仓库（无远程分支），继续扫描子目录
+                System.out.println("跳过空Git仓库（无远程分支）：" + dir.getAbsolutePath());
+            }
+        }
+
+        // 递归查找子目录
+        File[] subDirs = dir.listFiles(File::isDirectory);
+        if (subDirs != null) {
+            for (File subDir : subDirs) {
+                // 跳过常见的非仓库目录
+                String dirName = subDir.getName();
+                if (!dirName.equals("node_modules") && 
+                    !dirName.equals("target") && 
+                    !dirName.equals("build") &&
+                    !dirName.equals(".idea") &&
+                    !dirName.startsWith(".")) {
+                    findGitRepositories(subDir, repoPaths, maxDepth, currentDepth + 1);
+                }
+            }
+        }
+    }
+
+    /**
+     * 批量更新所有Git仓库代码
+     * @param basePath 基础路径，例如：/Users/zhoufz/hundsun/lcpt60/git/Sources/
+     */
+    public void updateAllGitRepositories(String basePath) {
+        if (Strings.isBlank(basePath)) {
+            System.out.println("基础路径不能为空！");
+            return;
+        }
+        if (!basePath.endsWith(File.separator)) {
+            basePath += File.separator;
+        }
+
+        File baseDir = new File(basePath);
+        if (!baseDir.exists() || !baseDir.isDirectory()) {
+            System.out.println("基础路径不存在或不是目录：" + basePath);
+            return;
+        }
+
+        System.out.println("========== 开始批量更新所有Git仓库 ==========");
+        System.out.println("基础路径：" + basePath);
+        System.out.println("扫描中...");
+
+        List<String> repoPaths = new ArrayList<>();
+        
+        // 递归查找所有Git仓库（最大深度5层，避免过深的目录结构）
+        findGitRepositories(baseDir, repoPaths, 5, 0);
+
+        if (repoPaths.isEmpty()) {
+            System.out.println("未找到任何Git仓库！");
+            return;
+        }
+
+        System.out.println("共找到 " + repoPaths.size() + " 个Git仓库");
+        System.out.println("开始更新...");
+
+        // 使用线程池并发更新
+        ArrayBlockingQueue<Runnable> blockingQueue = new ArrayBlockingQueue<>(50);
+        int corePoolSize = 5, maxPoolSize = 10, keepAliveTime = 30;
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                corePoolSize,
+                maxPoolSize,
+                keepAliveTime,
+                TimeUnit.SECONDS,
+                blockingQueue);
+
+        List<CompletableFuture<Boolean>> futures = new ArrayList<>();
+        
+        for (String repoPath : repoPaths) {
+            futures.add(CompletableFuture.supplyAsync(() -> {
+                return GitUtil.gitPull(repoPath);
+            }, executor));
+        }
+
+        // 等待所有更新完成
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        
+        // 统计结果
+        long successCount = futures.stream().filter(f -> {
+            try {
+                return f.get();
+            } catch (Exception e) {
+                return false;
+            }
+        }).count();
+        
+        executor.shutdown();
+        
+        System.out.println("========== 批量更新完成 ==========");
+        System.out.println("总计仓库数：" + repoPaths.size());
+        System.out.println("成功更新：" + successCount);
+        System.out.println("失败/跳过：" + (repoPaths.size() - successCount));
+    }
+
+    /**
+     * 扫描基础目录下所有有效Git仓库，并将“仓库名=物理路径”写入输出文件
+     * @param basePath 基础路径，例如：/Users/zhoufz/hundsun/lcpt60/git/Sources/
+     * @param outputPath 输出文件路径，例如：/Users/zhoufz/hundsun/tools/src/main/resources/gitrep.txt
+     */
+    public void generateGitRepositoryMapping(String basePath, String outputPath) {
+        if (Strings.isBlank(basePath) || Strings.isBlank(outputPath)) {
+            throw new IllegalArgumentException("basePath和outputPath不能为空");
+        }
+        if (!basePath.endsWith(File.separator)) {
+            basePath += File.separator;
+        }
+        File baseDir = new File(basePath);
+        if (!baseDir.exists() || !baseDir.isDirectory()) {
+            throw new IllegalArgumentException("基础路径不存在或不是目录：" + basePath);
+        }
+
+        List<String> repoPaths = new ArrayList<>();
+        findGitRepositories(baseDir, repoPaths, 6, 0);
+
+        Map<String, String> repositoryMapping = new LinkedHashMap<>();
+        for (String repoPath : repoPaths) {
+            addRepositoryMapping(repositoryMapping, repoPath);
+            Set<String> submodulePaths = getSubmodulePaths(repoPath);
+            for (String submodulePath : submodulePaths) {
+                addRepositoryMapping(repositoryMapping, submodulePath);
+            }
+        }
+
+        List<String> lines = new ArrayList<>();
+        repositoryMapping.forEach((key, value) -> lines.add(key + "=" + value));
+        try {
+            Path output = Paths.get(outputPath);
+            Files.createDirectories(output.getParent());
+            Set<String> mergedLines = new LinkedHashSet<>();
+            if (Files.exists(output)) {
+                List<String> existingLines = Files.readAllLines(output, StandardCharsets.UTF_8);
+                for (String existingLine : existingLines) {
+                    if (!Strings.isBlank(existingLine)) {
+                        mergedLines.add(existingLine.trim());
+                    }
+                }
+            }
+            mergedLines.addAll(lines);
+            Files.write(output, new ArrayList<>(mergedLines), StandardCharsets.UTF_8);
+            System.out.println("写入完成，新增仓库数量：" + lines.size());
+            System.out.println("合并后总记录数：" + mergedLines.size());
+            System.out.println("输出文件：" + outputPath);
+        } catch (Exception e) {
+            throw new RuntimeException("写入gitrep.txt失败", e);
+        }
+    }
+
+    private String getOriginRemote(String repoPath) {
+        try {
+            ProcessBuilder processBuilder = new ProcessBuilder("git", "config", "--get", "remote.origin.url");
+            processBuilder.directory(new File(repoPath));
+            processBuilder.redirectErrorStream(true);
+            Process process = processBuilder.start();
+
+            String result;
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                result = reader.readLine();
+            }
+            int exitCode = process.waitFor();
+            return exitCode == 0 ? result : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String extractRepositoryName(String remoteUrl) {
+        String normalized = remoteUrl.trim();
+        int slash = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf(':'));
+        if (slash < 0 || slash == normalized.length() - 1) {
+            return null;
+        }
+        String name = normalized.substring(slash + 1);
+        if (name.endsWith(".git")) {
+            name = name.substring(0, name.length() - 4);
+        }
+        return name;
+    }
+
+    private void addRepositoryMapping(Map<String, String> repositoryMapping, String repositoryPath) {
+        String remoteUrl = getOriginRemote(repositoryPath);
+        if (Strings.isBlank(remoteUrl)) {
+            return;
+        }
+        String repoName = extractRepositoryName(remoteUrl);
+        if (Strings.isBlank(repoName) || repositoryMapping.containsKey(repoName)) {
+            return;
+        }
+        repositoryMapping.put(repoName, repositoryPath);
+    }
+
+    private Set<String> getSubmodulePaths(String repoPath) {
+        Set<String> submodulePaths = new LinkedHashSet<>();
+        try {
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                    "git", "submodule", "foreach", "--quiet", "--recursive", "pwd");
+            processBuilder.directory(new File(repoPath));
+            processBuilder.redirectErrorStream(true);
+            Process process = processBuilder.start();
+
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String path = line.trim();
+                    if (!Strings.isBlank(path)) {
+                        submodulePaths.add(path);
+                    }
+                }
+            }
+            process.waitFor();
+        } catch (Exception ignored) {
+        }
+        return submodulePaths;
+    }
 
 
 }

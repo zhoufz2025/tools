@@ -1,8 +1,10 @@
 package com.zhoufz.tools;
 
+import com.zhoufz.tools.service.HundsunConfigFileServiceImpl;
 import com.zhoufz.tools.service.HundsunServiceImpl;
 import org.junit.Test;
 
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
@@ -49,6 +51,17 @@ public class HundsunTest {
         String basePath = "/Users/zhoufz/hundsun/lcpt60/git/Sources/";
         service.getGitCounterSourceCode(basePath);
     }
+
+    @Test
+    public void getBackUpConfigFile() throws IOException {
+        String sourceRoot = "/Users/zhoufz/hundsun/lcpt60/git/Sources/";
+        String targetRoot = "/Users/zhoufz/hundsun/lcpt60/config/";
+        HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
+        fileService.backupFiles(sourceRoot,targetRoot);
+
+    }
+
+
     
     @Test
     public void test() {
