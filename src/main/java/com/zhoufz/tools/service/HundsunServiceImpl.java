@@ -529,6 +529,88 @@ public class HundsunServiceImpl {
         }
     }
 
+    /**
+     * 根据 gitrep 映射文件对指定键名的仓库执行 {@code git pull}（含 submodule 时与 {@link GitUtil#gitPull} 一致）。
+     *
+     * @param gitrepPath      映射文件路径，每行 {@code 仓库键=仓库根目录绝对路径}；空行与 {@code #} 开头行为注释
+     * @param repositoryKey   与文件中键名一致，例如 lcpt-dxfund
+     * @return 是否拉取成功
+     * @throws IllegalArgumentException 路径或参数不合法，或映射中不存在该键
+     */
+    public boolean updateGitRepositoryFromGitrep(String gitrepPath, String repositoryKey) {
+        if (Strings.isBlank(gitrepPath)) {
+            throw new IllegalArgumentException("gitrepPath不能为空");
+        }
+        if (Strings.isBlank(repositoryKey)) {
+            throw new IllegalArgumentException("repositoryKey不能为空");
+        }
+        Map<String, String> mapping = readGitRepositoryMappingFile(gitrepPath);
+        String repoPath = mapping.get(repositoryKey);
+        if (Strings.isBlank(repoPath)) {
+            throw new IllegalArgumentException("gitrep中未找到仓库键：" + repositoryKey);
+        }
+        return GitUtil.gitPull(repoPath);
+    }
+
+    /**
+     * 根据 gitrep 映射文件将指定键名的仓库切换到指定分支/标签/提交。
+     *
+     * @param gitrepPath      映射文件路径，格式同 {@link #updateGitRepositoryFromGitrep}
+     * @param repositoryKey   仓库键名
+     * @param versionRef      分支名、标签名或提交号，例如 IFMS6.0V202607.00.005
+     * @return 是否切换成功
+     * @throws IllegalArgumentException 路径或参数不合法，或映射中不存在该键
+     */
+    public boolean checkoutGitRepositoryFromGitrep(String gitrepPath, String repositoryKey, String versionRef) {
+        if (Strings.isBlank(gitrepPath)) {
+            throw new IllegalArgumentException("gitrepPath不能为空");
+        }
+        if (Strings.isBlank(repositoryKey)) {
+            throw new IllegalArgumentException("repositoryKey不能为空");
+        }
+        if (Strings.isBlank(versionRef)) {
+            throw new IllegalArgumentException("versionRef不能为空");
+        }
+        Map<String, String> mapping = readGitRepositoryMappingFile(gitrepPath);
+        String repoPath = mapping.get(repositoryKey);
+        if (Strings.isBlank(repoPath)) {
+            throw new IllegalArgumentException("gitrep中未找到仓库键：" + repositoryKey);
+        }
+        return GitUtil.gitCheckout(repoPath, versionRef);
+    }
+
+    private Map<String, String> readGitRepositoryMappingFile(String gitrepPath) {
+        Path path = Paths.get(gitrepPath);
+        if (!Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("gitrep映射文件不存在：" + gitrepPath);
+        }
+        try {
+            Map<String, String> map = new LinkedHashMap<>();
+            for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+                String trimmed = line.trim();
+                if (Strings.isBlank(trimmed) || trimmed.startsWith("#")) {
+                    continue;
+                }
+                int eq = trimmed.indexOf('=');
+                if (eq <= 0) {
+                    throw new IllegalArgumentException("gitrep映射非法行（缺少=）：" + trimmed);
+                }
+                String key = trimmed.substring(0, eq).trim();
+                String value = trimmed.substring(eq + 1).trim();
+                if (Strings.isBlank(key) || Strings.isBlank(value)) {
+                    continue;
+                }
+                map.put(key, value);
+            }
+            if (map.isEmpty()) {
+                throw new IllegalArgumentException("gitrep映射文件无有效内容：" + gitrepPath);
+            }
+            return map;
+        } catch (IOException e) {
+            throw new RuntimeException("读取gitrep映射失败", e);
+        }
+    }
+
     private String getOriginRemote(String repoPath) {
         try {
             ProcessBuilder processBuilder = new ProcessBuilder("git", "config", "--get", "remote.origin.url");
