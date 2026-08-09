@@ -1,4 +1,9 @@
-F:\提交
-F:
-taskId:T202508116719-3
-verion:IFMS6.0V202405.08.010M10
+F:\AppSource=无
+F:\提交\Sources
+taskId:T202606251270
+verion:IFMS6.0V202607.00.015
+F:\GITIFMS6.0\Sources\app\ifmcounter\ifmcounter-dxfund\ifm\com\hundsun\lcpt\counter\bank\dbs\pub\CreatePdfVoucherService.java
+F:\GITIFMS6.0\Sources\app\ifmcounter\ifmcounter-dxfund\ifm\com\hundsun\lcpt\counter\bank\dbs\voucher\CreateAppropriateResultPdf.java
+F:\GITIFMS6.0\Sources\app\ifmcounter\ifmcounter-dxfund\ifm\com\hundsun\lcpt\counter\bank\dbs\voucher\CreateFnaPdf.java
+F:\GITIFMS6.0\Sources\app\ifmcounter\ifmcounter-dxfund\ifm\com\hundsun\lcpt\counter\bank\dbs\voucher\CreatePdfVoucherUtil.java
+F:\GITIFMS6.0\Sources\app\ifmcounter\ifmcounter-dxfund\ifm\com\hundsun\lcpt\counter\bank\dbs\voucher\CreatPdf119028.java

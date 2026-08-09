@@ -26,6 +26,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * @author zhoufz
@@ -40,37 +41,138 @@ public class HundsunServiceImpl {
     public static List<String> HUI_LIST = Arrays.asList(
             "HUI1.0", "console-dxasset-vue", "console-dxfund-vue","console-dxtrust-vue");
 
+    /** spsql 路径中的版本号，如 IFMS6.0V202607.02.000、IFMS6.0V202405.05.056M2 */
+    private static final Pattern SPSQL_VERSION_PATTERN =
+            Pattern.compile("IFMS6\\.0V\\d{6}\\.\\d{2}\\.\\d{3}[A-Za-z0-9]*");
+
+    /**
+     * 按 gitReplaceFile.txt 将源文件复制到目标工作区。
+     * <p>配置格式：第1行 源目录前缀=有|无；第2行 目标根目录（如 F:\提交\Sources）；
+     * 第3行 taskId:xxx；第4行 verion:xxx；第5行起为文件路径。
+     * <p>目标路径按模块映射：app→{目标根}\app\...，前端→{目标根}\lcpt-front\...，低柜→{目标根}\ifmcounter\...，
+     * 相对路径与原文件在各自模块下的目录结构一致。
+     */
     public void gitReplaceSqlFile(String fileName) {
         List<String> list = FileUtil.readFile(fileName);
-        String sourcePrefix = list.get(0);
-        String targetPrefix = list.get(1);
-        String taskId = list.get(2);
-        String version = list.get(3);
-        taskId = taskId.substring(taskId.indexOf(":") + 1);
-        version = version.substring(version.indexOf(":") + 1);
-        File target;
-        File source;
+        if (list == null || list.size() < 5) {
+            throw new IllegalArgumentException("配置文件格式错误，至少需要5行");
+        }
+        boolean useSourcePrefix = true;
+        String sourcePrefix = list.get(0).trim();
+        if (sourcePrefix.contains("=")) {
+            String flag = sourcePrefix.substring(sourcePrefix.indexOf('=') + 1).trim();
+            sourcePrefix = sourcePrefix.substring(0, sourcePrefix.indexOf('=')).trim();
+            useSourcePrefix = "有".equals(flag);
+        }
+        String targetBase = normalizeGitPath(list.get(1));
+        String taskId = extractConfigValue(list.get(2));
+        String version = extractConfigValue(list.get(3));
         try {
             for (int i = 4; i < list.size(); i++) {
-                String readLine = list.get(i);
-                if (readLine.contains("spsql")) {
-                    String sourceVersion = readLine.substring(readLine.lastIndexOf("\\") + 1, readLine.lastIndexOf("\\") + 1 + "IFMS6.0V202506.00.000".length());
-                    target = new File(targetPrefix + readLine.replace(sourceVersion, version));
-                    source = new File(sourcePrefix + readLine);
-                    System.out.println(readLine.replace(sourceVersion, version));
+                String readLine = list.get(i).trim();
+                if (readLine.isEmpty()) {
+                    continue;
+                }
+                File source = new File(resolveGitSourcePath(readLine, sourcePrefix, useSourcePrefix));
+                File target = new File(resolveGitTargetPath(source.getAbsolutePath(), targetBase, version));
+                System.out.println("源: " + source.getAbsolutePath());
+                System.out.println("目标: " + target.getAbsolutePath());
+                if (isSpsqlPath(source.getAbsolutePath())) {
                     FileUtil.replaceSql(target, source, taskId);
-                }else{
-                    target = new File(targetPrefix + readLine);
-                    source = new File(sourcePrefix + readLine);
-                    System.out.println(targetPrefix + readLine);
-                    System.out.println(sourcePrefix + readLine);
+                } else {
                     FileUtil.replace(target, source);
                 }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new RuntimeException("gitReplaceSqlFile 执行失败", e);
         }
-    
+    }
+
+    private static String extractConfigValue(String line) {
+        int colon = line.indexOf(':');
+        return colon >= 0 ? line.substring(colon + 1).trim() : line.trim();
+    }
+
+    private static String normalizeGitPath(String path) {
+        if (path == null) {
+            return "";
+        }
+        String normalized = path.trim().replace('/', File.separatorChar);
+        while (normalized.endsWith(File.separator)) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
+    private static String resolveGitSourcePath(String line, String sourcePrefix, boolean useSourcePrefix) {
+        if (!useSourcePrefix) {
+            return normalizeGitPath(line);
+        }
+        String prefix = normalizeGitPath(sourcePrefix);
+        String relative = line.trim().replace('/', File.separatorChar);
+        while (relative.startsWith(File.separator)) {
+            relative = relative.substring(1);
+        }
+        return prefix + File.separator + relative;
+    }
+
+    private static String resolveGitTargetPath(String sourcePath, String targetBase, String targetVersion) {
+        String normalizedSource = normalizeGitPath(sourcePath);
+        String base = normalizeGitPath(targetBase);
+        String relativePath = extractGitModuleRelativePath(normalizedSource);
+        if (relativePath == null) {
+            throw new IllegalArgumentException("无法识别文件所属模块(app/lcpt-front/ifmcounter): " + sourcePath);
+        }
+        String moduleRoot = resolveGitTargetModuleRoot(normalizedSource);
+        String targetPath = base + File.separator + moduleRoot + File.separator + relativePath;
+        return applySpsqlVersionReplace(targetPath, targetVersion);
+    }
+
+    private static String resolveGitTargetModuleRoot(String sourcePath) {
+        String lower = sourcePath.toLowerCase();
+        if (lower.contains("\\ifmcounter\\") || lower.contains("\\ifmcounter-")) {
+            return "ifmcounter";
+        }
+        if (lower.contains("\\lcpt-front\\")) {
+            return "lcpt-front";
+        }
+        return "app";
+    }
+
+    private static String extractGitModuleRelativePath(String sourcePath) {
+        String lower = sourcePath.toLowerCase();
+        String ifmcounterMarker = "\\ifmcounter\\";
+        int ifmcounterIdx = lower.indexOf(ifmcounterMarker);
+        if (ifmcounterIdx >= 0) {
+            return sourcePath.substring(ifmcounterIdx + ifmcounterMarker.length());
+        }
+        String frontMarker = "\\lcpt-front\\";
+        int frontIdx = lower.indexOf(frontMarker);
+        if (frontIdx >= 0) {
+            return sourcePath.substring(frontIdx + frontMarker.length());
+        }
+        String appMarker = "\\sources\\app\\";
+        int appIdx = lower.indexOf(appMarker);
+        if (appIdx >= 0) {
+            return sourcePath.substring(appIdx + appMarker.length());
+        }
+        String appShortMarker = "\\app\\";
+        appIdx = lower.indexOf(appShortMarker);
+        if (appIdx >= 0) {
+            return sourcePath.substring(appIdx + appShortMarker.length());
+        }
+        return null;
+    }
+
+    private static boolean isSpsqlPath(String path) {
+        return path != null && path.toLowerCase().contains("\\spsql\\");
+    }
+
+    private static String applySpsqlVersionReplace(String path, String targetVersion) {
+        if (Strings.isBlank(targetVersion) || !isSpsqlPath(path)) {
+            return path;
+        }
+        return SPSQL_VERSION_PATTERN.matcher(path).replaceAll(targetVersion);
     }
     
     public void svnReplaceSqlFile(String fileName) {
@@ -269,6 +371,51 @@ public class HundsunServiceImpl {
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         executor.shutdown();
 
+    }
+
+    /**
+     * 按 projectGit.xlsx 批量 clone 银行个性化工程仓库到指定目录。
+     * <p>Excel 第1列为项目编号（如 86567.MTSH_FUNDINSURE），第2列为 Git 地址；
+     * 目标目录为 {@code basePath} 下以仓库名命名的子目录（如 lcpt-mtsh_fundinsure）。</p>
+     *
+     * @param basePath 下载根目录，例如 F:\提交\ProjectSources
+     */
+    public void getProjectGitSourceCode(String basePath) {
+        if (Strings.isBlank(basePath)) {
+            return;
+        }
+        if (!basePath.endsWith(File.separator)) {
+            basePath += File.separator;
+        }
+        Map<String, String> map = ExcelUtil.readExcel("projectGit.xlsx");
+        ArrayBlockingQueue<Runnable> blockingQueue = new ArrayBlockingQueue<>(50);
+        int corePoolSize = 10, maxPoolSize = 10, keepAliveTime = 30;
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                corePoolSize,
+                maxPoolSize,
+                keepAliveTime,
+                TimeUnit.SECONDS,
+                blockingQueue);
+        String basePathTemp = basePath;
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        map.forEach((key, value) -> {
+            if (Strings.isBlank(key) || Strings.isBlank(value)) {
+                return;
+            }
+            futures.add(CompletableFuture.runAsync(() -> {
+                String repoName = extractRepositoryName(value);
+                if (Strings.isBlank(repoName)) {
+                    repoName = key;
+                }
+                File file = new File(basePathTemp + repoName);
+                if (!file.exists()) {
+                    System.out.println("======下载项目 " + key + " -> " + repoName);
+                    GitUtil.getClone(value, basePathTemp);
+                }
+            }, executor));
+        });
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        executor.shutdown();
     }
 
     private static void initGitSourcePath(String basePath) {
@@ -499,10 +646,7 @@ public class HundsunServiceImpl {
         Map<String, String> repositoryMapping = new LinkedHashMap<>();
         for (String repoPath : repoPaths) {
             addRepositoryMapping(repositoryMapping, repoPath);
-            Set<String> submodulePaths = getSubmodulePaths(repoPath);
-            for (String submodulePath : submodulePaths) {
-                addRepositoryMapping(repositoryMapping, submodulePath);
-            }
+            collectSubmoduleMappings(repoPath, repositoryMapping);
         }
 
         List<String> lines = new ArrayList<>();
@@ -655,29 +799,49 @@ public class HundsunServiceImpl {
         repositoryMapping.put(repoName, repositoryPath);
     }
 
-    private Set<String> getSubmodulePaths(String repoPath) {
-        Set<String> submodulePaths = new LinkedHashSet<>();
+    /**
+     * 从 .gitmodules 递归收集 submodule 映射（含未 init 的 submodule，路径取自 path 配置）。
+     */
+    private void collectSubmoduleMappings(String parentRepoPath, Map<String, String> repositoryMapping) {
+        File gitmodulesFile = new File(parentRepoPath, ".gitmodules");
+        if (!gitmodulesFile.isFile()) {
+            return;
+        }
+        String currentPath = null;
+        String currentUrl = null;
         try {
-            ProcessBuilder processBuilder = new ProcessBuilder(
-                    "git", "submodule", "foreach", "--quiet", "--recursive", "pwd");
-            processBuilder.directory(new File(repoPath));
-            processBuilder.redirectErrorStream(true);
-            Process process = processBuilder.start();
-
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    String path = line.trim();
-                    if (!Strings.isBlank(path)) {
-                        submodulePaths.add(path);
-                    }
+            for (String line : Files.readAllLines(gitmodulesFile.toPath(), StandardCharsets.UTF_8)) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("[submodule")) {
+                    flushSubmoduleMapping(parentRepoPath, repositoryMapping, currentPath, currentUrl);
+                    currentPath = null;
+                    currentUrl = null;
+                } else if (trimmed.startsWith("path = ")) {
+                    currentPath = trimmed.substring("path = ".length()).trim();
+                } else if (trimmed.startsWith("url = ")) {
+                    currentUrl = trimmed.substring("url = ".length()).trim();
                 }
             }
-            process.waitFor();
-        } catch (Exception ignored) {
+            flushSubmoduleMapping(parentRepoPath, repositoryMapping, currentPath, currentUrl);
+        } catch (IOException ignored) {
         }
-        return submodulePaths;
+    }
+
+    private void flushSubmoduleMapping(String parentRepoPath, Map<String, String> repositoryMapping,
+                                       String relativePath, String urlFromGitmodules) {
+        if (Strings.isBlank(relativePath)) {
+            return;
+        }
+        String absPath = new File(parentRepoPath, relativePath).getAbsolutePath();
+        int sizeBefore = repositoryMapping.size();
+        addRepositoryMapping(repositoryMapping, absPath);
+        if (repositoryMapping.size() == sizeBefore && !Strings.isBlank(urlFromGitmodules)) {
+            String repoName = extractRepositoryName(urlFromGitmodules);
+            if (!Strings.isBlank(repoName) && !repositoryMapping.containsKey(repoName)) {
+                repositoryMapping.put(repoName, absPath);
+            }
+        }
+        collectSubmoduleMappings(absPath, repositoryMapping);
     }
 
 

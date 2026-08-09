@@ -37,70 +37,68 @@ public class HundsunTest {
         String basePath = "F:\\提交\\Sources\\app";
         service.getGitSourceCode(basePath);
     }
+    
+    /**
+     * 按 projectGit.xlsx（resources/projectGit.xlsx）批量 clone 银行个性化工程仓库。
+     * Excel 第1列：项目编号；第2列：Git 地址；下载到 basePath 下以仓库名命名的子目录。
+     */
+    @Test
+    public void getProjectGitSourceCode() {
+        HundsunServiceImpl service = new HundsunServiceImpl();
+        String basePath = "F:\\ProjectSource";
+        service.getProjectGitSourceCode(basePath);
+    }
 
     @Test
     public void getGitHuiSourceCode() {
         HundsunServiceImpl service = new HundsunServiceImpl();
-        String basePath = "/Users/zhoufz/hundsun/lcpt60/git/Sources/";
+        String basePath = "F:\\提交\\Sources";
         service.getGitHuiSourceCode(basePath);
     }
 
     @Test
     public void getGitCounterSourceCode() {
         HundsunServiceImpl service = new HundsunServiceImpl();
-        String basePath = "/Users/zhoufz/hundsun/lcpt60/git/Sources/";
+        String basePath = "F:\\提交\\Sources";
         service.getGitCounterSourceCode(basePath);
     }
 
     @Test
     public void getBackUpConfigFile() throws IOException {
-        String sourceRoot = "/Users/zhoufz/hundsun/lcpt60/git/Sources/";
-        String targetRoot = "/Users/zhoufz/hundsun/lcpt60/config/";
+        String sourceRoot = "F:\\AppSource\\Sources\\app\\";
+        String targetRoot = "F:\\AppSource\\backup20260809";
         HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
         fileService.backupFiles(sourceRoot,targetRoot);
 
     }
-
-
     
     @Test
-    public void test() {
-        try {
-            int date1 = 20241227;
-            int date2 = 20250108;
-            // 将int格式的日期转换为Date对象
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd");
-            Date dateObj1 = sdf.parse(String.valueOf(date1));
-            Date dateObj2 = sdf.parse(String.valueOf(date2));
-        
-            // 获取日历实例
-            Calendar cal1 = Calendar.getInstance();
-            Calendar cal2 = Calendar.getInstance();
-        
-            cal1.setTime(dateObj1);
-            cal2.setTime(dateObj2);
-        
-            // 获取年份和周数
-            int week1 = cal1.get(Calendar.WEEK_OF_YEAR);
-            System.out.println(week1);
-            int week2 = cal2.get(Calendar.WEEK_OF_YEAR);
-            System.out.println(week2);
-            // 判断是否在同一年的同一周
-            System.out.println(week1==week2);
-        } catch (Exception e) {
-            // 如果日期格式不正确，返回false
-            System.out.println(false);
-        }
+    public void getRestoreFiles() throws IOException {
+        String sourceRoot = "F:\\AppSource\\Sources";
+        String targetRoot = "F:\\AppSource\\backup20260720";
+        HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
+        fileService.restoreFiles(sourceRoot,targetRoot);
         
     }
-    
+
+    /**
+     * 按 backUpFile.txt 列表备份指定文件到备份目录
+     */
     @Test
-    public void test2() {
-        System.out.println("1".split(",")[0]);
-    
+    public void backUpSpecifiedFiles() throws IOException {
+        String backupRoot = "F:\\AppSource\\backup-specified";
+        HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
+        fileService.backupSpecifiedFiles(backupRoot);
     }
-    
-    
-    
-    
+
+    /**
+     * 按 backUpFile.txt 列表从备份目录还原指定文件
+     */
+    @Test
+    public void restoreSpecifiedFiles() throws IOException {
+        String backupRoot = "F:\\AppSource\\backup-specified";
+        HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
+        fileService.restoreSpecifiedFiles(backupRoot);
+    }
+
 }

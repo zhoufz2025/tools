@@ -26,7 +26,15 @@ public class ExcelUtil {
             for (Row row : sheet) {
                 Cell key = row.getCell(0);
                 Cell value = row.getCell(1);
-                map.put(key.toString(), value.toString());
+                if (key == null || value == null) {
+                    continue;
+                }
+                String keyStr = key.toString().trim();
+                String valueStr = value.toString().trim();
+                if (keyStr.isEmpty() || valueStr.isEmpty()) {
+                    continue;
+                }
+                map.put(keyStr, valueStr);
             }
             return map;
         } catch (FileNotFoundException e) {
