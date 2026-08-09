@@ -1,0 +1,7 @@
+# 工程 -> 产品 指定文件移植列表
+# 每行一个工程侧文件的绝对路径（位于 projectProduct.properties 配置的工程银行目录下）
+# 以 # 开头的行视为注释；空行忽略
+# 联机文件会自动做 bootstrap-adapter -> bootstrap 路径映射
+
+# 示例（请按实际路径修改后取消注释）:
+# F:\ProjectSource\lcpt-mtsh_fundinsure\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-batch-bootstrap-adapter\src\main\java\com\hundsun\lcpt\dxfund\pub\batch\bank\mtsh_fundinsure\impl\MTSH210210GetHostFileService.java

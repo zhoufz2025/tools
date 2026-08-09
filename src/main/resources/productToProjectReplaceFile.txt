@@ -1,0 +1,14 @@
+# 产品 -> 工程 指定文件移植列表
+# 每行一个产品侧文件的绝对路径
+# 以 # 开头的行视为注释；空行忽略
+# 联机文件会自动做 bootstrap -> bootstrap-adapter 路径映射
+# 前端文件会自动做 console-{biz}-vue -> console-{biz}-bank-vue 路径映射
+# 低柜文件会自动剥掉 ifmcounter / ifmcounter-* 子模块前缀（工程侧扁平）
+# 前端 .js/.vue 会改写 @ConsoleXxxVue/views|router/bank → @ConsoleXxxBankVue（components/api 别名不变）
+
+# 示例（请按实际路径修改后取消注释）:
+# F:\AppSource\Sources\app\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-batch-bootstrap\src\main\java\com\hundsun\lcpt\dxfund\pub\batch\bank\mtsh_fundinsure\impl\MTSH210210GetHostFileService.java
+F:\AppSource\Sources\app\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-online-bootstrap\src\main\java\com\hundsun\lcpt\dxfund\pub\online\bank\qhyh_dxfund\T119006\T119006HSAdapter.java
+F:\AppSource\Sources\app\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-online-bootstrap\src\main\java\com\hundsun\lcpt\dxfund\pub\online\bank\qhyh_dxfund\T119006\TransVar119006.java
+F:\AppSource\Sources\app\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-online-bootstrap\src\main\java\com\hundsun\lcpt\dxfund\pub\online\bank\qhyh_dxfund\T119005\TransVar119005.java
+F:\AppSource\Sources\app\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-online-bootstrap\src\main\java\com\hundsun\lcpt\dxfund\pub\online\bank\qhyh_dxfund\T119005\T119005HSAdapter.java
