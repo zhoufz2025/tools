@@ -1,6 +1,6 @@
 F:\AppSource
-F:\小包\202405.05\056M1
+F:\小包\202405.02
 F:\小包\202405.05\056M1\IFMS6.0V202405.05.056M2
 F:\小包\202203.09\202203.09.053M1\lcpt-front\biz
 taskId:T202605144282
-
+\Sources\app\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-batch-bootstrap\src\main\java\com\hundsun\lcpt\dxfund\pub\batch\bank\shnsh\T219310\T219310HSAdapter.java

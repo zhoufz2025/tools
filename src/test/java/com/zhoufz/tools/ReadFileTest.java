@@ -18,7 +18,7 @@ public class ReadFileTest {
 
     @Test
     public void readFile() {
-        String filePath = "F:\\git-tools\\tools\\src\\main\\resources\\OUTER_SKIRT_ACCOUTNTSYS_1773039725954_AP.txt";
+        String filePath = "F:\\git-tools\\tools\\src\\main\\resources\\OUTER_SKIRT_ACCOUTNTSYS_1786094659046_202606170000000022.txt";
         String readLine;
         System.out.println(File.separator);
         String[] fieldValue = null;
@@ -26,11 +26,11 @@ public class ReadFileTest {
                      new BufferedReader(new InputStreamReader(new FileInputStream(filePath)))){
             while ((readLine = bufferedReader.readLine()) != null) {
                 // System.out.println(readLine);
-                fieldValue = readLine.split("\\|");
+                fieldValue = readLine.split(String.valueOf((char) 0x03));
                 // for (String s : fieldValue) {
                 //     System.out.println(s);
                 // }
-                System.out.println(fieldValue[7]);
+                System.out.println(fieldValue.length);
             }
         } catch (FileNotFoundException e) {
             throw new RuntimeException(e);

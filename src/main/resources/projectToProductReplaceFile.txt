@@ -5,3 +5,4 @@
 
 # 示例（请按实际路径修改后取消注释）:
 # F:\ProjectSource\lcpt-mtsh_fundinsure\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-batch-bootstrap-adapter\src\main\java\com\hundsun\lcpt\dxfund\pub\batch\bank\mtsh_fundinsure\impl\MTSH210210GetHostFileService.java
+F:\ProjectSource\lcpt-qhyh_dxfund\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-batch-bootstrap-adapter\src\main\java\com\hundsun\lcpt\dxfund\pub\batch\bank\qhyh_dxfund\impl\Qhyh210013MergeSquareFileService.java
