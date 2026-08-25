@@ -65,8 +65,8 @@ public class HundsunTest {
 
     @Test
     public void getBackUpConfigFile() throws IOException {
-        String sourceRoot = "F:\\AppSource\\Sources\\app\\";
-        String targetRoot = "F:\\AppSource\\backup20260809";
+        String sourceRoot = "F:\\提交\\Sources\\app";
+        String targetRoot = "F:\\AppSource\\backup20260825";
         HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
         fileService.backupFiles(sourceRoot,targetRoot);
 
@@ -74,8 +74,8 @@ public class HundsunTest {
     
     @Test
     public void getRestoreFiles() throws IOException {
-        String sourceRoot = "F:\\AppSource\\Sources";
-        String targetRoot = "F:\\AppSource\\backup20260720";
+        String sourceRoot = "F:\\AppSource\\Sources\\app";
+        String targetRoot = "F:\\AppSource\\backup20260825";
         HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
         fileService.restoreFiles(sourceRoot,targetRoot);
         

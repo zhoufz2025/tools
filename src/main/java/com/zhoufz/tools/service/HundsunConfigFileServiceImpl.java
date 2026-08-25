@@ -75,8 +75,8 @@ public class HundsunConfigFileServiceImpl {
     }
 
     /**
-     * 将 targetRoot 下的配置文件（pom.xml、log4j2.xml、application.properties、ServerStarter.java）
-     * 按原相对路径替换回 sourceRoot
+     * 将 targetRoot 下的配置文件（log4j2.xml、application.properties、ServerStarter.java 等）
+     * 按原相对路径替换回 sourceRoot；还原时排除 pom.xml（备份仍可包含 pom）
      * @param sourceRoot 目标目录（要被替换的目录）
      * @param targetRoot 源目录（备份目录）
      * @return 还原的文件列表
@@ -97,6 +97,11 @@ public class HundsunConfigFileServiceImpl {
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                // 还原时排除 pom，避免覆盖工程依赖与触发 IDEA Maven 自动导入
+                if (!"pom.xml".equalsIgnoreCase(file.getFileName().toString())) {
+                    System.out.println("[RESTORE][SKIP] " + file);
+                    return FileVisitResult.CONTINUE;
+                }
                 if (shouldBackup(file, targetPath)) {
                     Path relativePath = targetPath.relativize(file);
                     Path sourceFile = sourcePath.resolve(relativePath);
