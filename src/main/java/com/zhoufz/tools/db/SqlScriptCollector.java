@@ -1,7 +1,6 @@
 package com.zhoufz.tools.db;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -118,6 +117,14 @@ public class SqlScriptCollector {
                             skipped.add("跳过非 MySQL 工作流脚本: " + path);
                             return;
                         }
+                        if (isNonMysqlVendorFile(path)) {
+                            skipped.add("跳过非 MySQL 脚本: " + path);
+                            return;
+                        }
+                        if (isConfirmLaterFile(path)) {
+                            skipped.add("跳过需现场确认脚本: " + path);
+                            return;
+                        }
                         result.add(path);
                     });
         }
@@ -127,6 +134,28 @@ public class SqlScriptCollector {
         String normalized = path.toString().replace('\\', '/').toLowerCase(Locale.ROOT);
         return normalized.contains("/initdata/workflow/")
                 && !normalized.contains("/initdata/workflow/mysql/");
+    }
+
+    private boolean isNonMysqlVendorFile(Path path) {
+        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (name.contains(".mysql.") || name.endsWith(".mysql.sql") || name.contains("_mysql.")) {
+            return false;
+        }
+        return name.endsWith(".ora.sql")
+                || name.endsWith(".oracle.sql")
+                || name.endsWith("_oracle.sql")
+                || name.endsWith(".pg.sql")
+                || name.endsWith("_pg.sql")
+                || name.endsWith(".ob.sql")
+                || name.endsWith("_ob.sql")
+                || name.contains(".ora.")
+                || name.contains(".oracle.")
+                || name.contains(".pg.")
+                || name.contains(".ob.");
+    }
+
+    private boolean isConfirmLaterFile(Path path) {
+        return path.getFileName().toString().contains("需要确认");
     }
 
     private boolean isSqlFile(Path path) {

@@ -23,6 +23,33 @@ public class DbInitTargetTest {
     private final SqlScriptCollector collector = new SqlScriptCollector();
 
     @Test
+    public void finaShouldMapPubToLcptpubAndTransToFinatrans() {
+        List<DbInitTarget> targets = DbInitTarget.buildForCategories(EnumSet.of(DbInitCategory.FINA), false);
+        Assert.assertEquals(3, targets.size());
+
+        DbInitTarget lcptpub = targets.stream()
+                .filter(DbInitTarget::isPubDatabase)
+                .findFirst()
+                .orElse(null);
+        Assert.assertNotNull(lcptpub);
+        Assert.assertEquals(java.util.Collections.singletonList("sql-fina/pub/fina"), lcptpub.getSqlModulePaths());
+        Assert.assertFalse(lcptpub.isDropOnRecreate());
+
+        List<String> transDbs = targets.stream()
+                .filter(t -> !t.isPubDatabase())
+                .map(DbInitTarget::getDatabaseName)
+                .collect(java.util.stream.Collectors.toList());
+        Assert.assertEquals(java.util.Arrays.asList("finatrans1", "finatrans2"), transDbs);
+        for (DbInitTarget target : targets) {
+            if (!target.isPubDatabase()) {
+                Assert.assertEquals(java.util.Collections.singletonList("sql-fina/trans/fina"),
+                        target.getSqlModulePaths());
+                Assert.assertTrue(target.isDropOnRecreate());
+            }
+        }
+    }
+
+    @Test
     public void allPubModulesShouldTargetLcptpub() {
         List<DbInitTarget> targets = DbInitTarget.buildForCategories(EnumSet.allOf(DbInitCategory.class), false);
         DbInitTarget lcptpub = targets.stream()
@@ -43,7 +70,9 @@ public class DbInitTargetTest {
                 "sql-dxasset/pub/dxasset",
                 "sql-dxasset/trans/dxasset",
                 "sql-dxtrust/pub/dxtrust",
-                "sql-dxtrust/trans/dxtrust"
+                "sql-dxtrust/trans/dxtrust",
+                "sql-fina/pub/fina",
+                "sql-fina/trans/fina"
         };
         for (String module : modules) {
             Path moduleRoot = Paths.get(SQL_ROOT, module);

@@ -28,9 +28,10 @@ public class LocalDbInitTest {
     private LocalDbInitService localDbInitService;
 
     /**
-     * 仅建库
+     * 仅建库（默认种类：pub,dxfund,dxasset,dxtrust，不含 fina）
      */
     @Test
+    @Ignore("会按默认种类建库，只刷理财请跑 initFina")
     public void createDatabases() {
         LocalDbInitResult result = localDbInitService.createDatabases();
         printResult(result);
@@ -47,6 +48,26 @@ public class LocalDbInitTest {
     }
 
     /**
+     * 仅刷新理财：建库 + DDL + initdata。
+     * pub 写入 lcptpub（不 DROP 库，但 schema 会 drop 理财相关表），trans 写入 finatrans1/2。
+     */
+    @Test
+    @Ignore("表结构已刷过时不要再跑；续跑 initdata 请用 initFinaData")
+    public void initFina() {
+        LocalDbInitResult result = localDbInitService.initAll(EnumSet.of(DbInitCategory.FINA));
+        printResult(result);
+    }
+
+    /**
+     * 仅刷理财 initdata（表结构已成功、中途失败后续跑这个，不要再跑 initFina）
+     */
+    @Test
+    public void initFinaData() {
+        LocalDbInitResult result = localDbInitService.initData(EnumSet.of(DbInitCategory.FINA));
+        printResult(result);
+    }
+
+    /**
      * 全量：DROP 重建 + DDL + initdata（耗时很长，去掉 @Ignore 后单独跑）
      */
     @Test
@@ -57,20 +78,20 @@ public class LocalDbInitTest {
     }
 
     /**
-     * 仅表结构（去掉 @Ignore 后单独跑）
+     * 仅表结构（默认种类，不含 fina）
      */
     @Test
-    // @Ignore("DDL 脚本体积大，确认密码后手动执行")
+    @Ignore("会按默认种类刷 DDL，只刷理财请跑 initFina")
     public void initSchema() {
         LocalDbInitResult result = localDbInitService.initSchema();
         printResult(result);
     }
 
     /**
-     * 仅基础数据（去掉 @Ignore 后单独跑）
+     * 仅基础数据（默认种类，不含 fina）
      */
     @Test
-    // @Ignore("需先完成 initSchema")
+    @Ignore("会按默认种类刷 initdata，只刷理财请跑 initFina")
     public void initData() {
         LocalDbInitResult result = localDbInitService.initData();
         printResult(result);

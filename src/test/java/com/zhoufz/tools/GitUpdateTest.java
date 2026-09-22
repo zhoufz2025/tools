@@ -13,10 +13,10 @@ public class GitUpdateTest {
 
     /** 与 {@code src/main/resources/gitrep.txt} 中每行左侧键名一致，例如 lcpt-dxfund
      * HUI1.0-console-dxasset、spsql-dxasset、ifmcounter-dxfund、lcpt-web-manager-dxasset */
-    private static final String TARGET_REPO_KEY = "lcpt-dxfund";
+    private static final String TARGET_REPO_KEY = "spsql-dxfund";
 
     /** 要切换到的分支或标签名，例如 IFMS6.0V202607.00.005 */
-    private static final String TARGET_VERSION = "IFMS6.0V202607.00.017";
+    private static final String TARGET_VERSION = "IFMS6.0V202607.00.016";
 
     private static final String GITREP_TXT =
             "F:\\git-tools\\tools\\src\\main\\resources\\gitrep.txt";
@@ -33,7 +33,7 @@ public class GitUpdateTest {
     public void updateAllRepositories() {
         HundsunServiceImpl service = new HundsunServiceImpl();
         // 替换为您实际的基础路径
-        String basePath = "F:\\提交\\Sources\\app";
+        String basePath = "/Users/zhoufz/hundsun/lcpt60/git/Sources/";
         service.updateAllGitRepositories(basePath);
     }
 

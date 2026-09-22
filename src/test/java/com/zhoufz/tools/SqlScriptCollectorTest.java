@@ -68,4 +68,33 @@ public class SqlScriptCollectorTest {
         Assert.assertTrue(indexIdx >= 0);
         Assert.assertTrue("query 表结构应先于索引执行", tableIdx < indexIdx);
     }
+
+    @Test
+    public void finaInitDataShouldSkipConfirmLaterParamFile() throws Exception {
+        Path moduleRoot = Paths.get(SQL_ROOT, "sql-fina/pub/fina");
+        SqlScriptCollectResult result = collector.collectWithSkipped(moduleRoot, SqlScriptPhase.INITDATA);
+        for (Path script : result.getScripts()) {
+            Assert.assertFalse("不应收集需现场确认脚本: " + script,
+                    script.getFileName().toString().contains("需要确认"));
+        }
+        Assert.assertTrue(result.getSkippedScripts().stream()
+                .anyMatch(s -> s.contains("需现场确认")));
+    }
+
+    @Test
+    public void finaInitDataShouldSkipOracleAndPgWorkflowFiles() throws Exception {
+        Path moduleRoot = Paths.get(SQL_ROOT, "sql-fina/pub/fina");
+        SqlScriptCollectResult result = collector.collectWithSkipped(moduleRoot, SqlScriptPhase.INITDATA);
+        for (Path script : result.getScripts()) {
+            String name = script.getFileName().toString().toLowerCase();
+            Assert.assertFalse("不应收集 Oracle 脚本: " + script, name.contains(".ora.") || name.endsWith(".ora.sql"));
+            Assert.assertFalse("不应收集 PG 脚本: " + script, name.contains(".pg.") || name.endsWith(".pg.sql"));
+        }
+        Assert.assertTrue(result.getScripts().stream()
+                .anyMatch(p -> p.getFileName().toString().equals("workflow_initdata.mysql.sql")));
+        Assert.assertTrue(result.getSkippedScripts().stream()
+                .anyMatch(s -> s.contains("workflow_initdata.ora.sql")));
+        Assert.assertTrue(result.getSkippedScripts().stream()
+                .anyMatch(s -> s.contains("workflow_initdata.pg.sql")));
+    }
 }

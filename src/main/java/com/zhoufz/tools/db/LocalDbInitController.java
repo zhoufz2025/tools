@@ -3,8 +3,8 @@ package com.zhoufz.tools.db;
 import com.zhoufz.tools.dto.Result;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -52,9 +52,9 @@ public class LocalDbInitController {
     /**
      * 仅建库（CREATE DATABASE IF NOT EXISTS）
      *
-     * @param categories 可选，逗号分隔：pub,dxfund,dxasset,dxtrust
+     * @param categories 可选，逗号分隔：pub,dxfund,dxasset,dxtrust,fina
      */
-    @PostMapping("/createDatabases")
+    @RequestMapping(value = "/createDatabases", method = {RequestMethod.GET, RequestMethod.POST})
     public Result<LocalDbInitResult> createDatabases(
             @RequestParam(value = "categories", required = false) String categories) {
         return wrap(localDbInitService.createDatabases(resolveCategories(categories)));
@@ -63,7 +63,7 @@ public class LocalDbInitController {
     /**
      * 建库 + 执行表结构 DDL
      */
-    @PostMapping("/initSchema")
+    @RequestMapping(value = "/initSchema", method = {RequestMethod.GET, RequestMethod.POST})
     public Result<LocalDbInitResult> initSchema(
             @RequestParam(value = "categories", required = false) String categories) {
         return wrap(localDbInitService.initSchema(resolveCategories(categories)));
@@ -72,7 +72,7 @@ public class LocalDbInitController {
     /**
      * 仅执行 initdata（表须已存在）
      */
-    @PostMapping("/initData")
+    @RequestMapping(value = "/initData", method = {RequestMethod.GET, RequestMethod.POST})
     public Result<LocalDbInitResult> initData(
             @RequestParam(value = "categories", required = false) String categories) {
         return wrap(localDbInitService.initData(resolveCategories(categories)));
@@ -81,7 +81,7 @@ public class LocalDbInitController {
     /**
      * 全量：建库 + DDL + initdata
      */
-    @PostMapping("/initAll")
+    @RequestMapping(value = "/initAll", method = {RequestMethod.GET, RequestMethod.POST})
     public Result<LocalDbInitResult> initAll(
             @RequestParam(value = "categories", required = false) String categories) {
         return wrap(localDbInitService.initAll(resolveCategories(categories)));
@@ -90,7 +90,7 @@ public class LocalDbInitController {
     /**
      * 全量：建库 + DDL + initdata
      */
-    @PostMapping("/init")
+    @RequestMapping(value = "/init", method = {RequestMethod.GET, RequestMethod.POST})
     public Result<LocalDbInitResult> init(
             @RequestParam(value = "categories", required = false) String categories) {
         return wrap(localDbInitService.initAll(resolveCategories(categories)));

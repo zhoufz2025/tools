@@ -5,8 +5,10 @@ import java.io.File;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author zhoufz
@@ -14,20 +16,35 @@ import java.util.List;
  */
 public class GitUtil {
 
+    /**
+     * 解析本机 git 可执行文件。IntelliJ 从 Dock 启动时 PATH 往往不含 Homebrew，
+     * 需要用绝对路径启动 git。
+     */
+    public static String resolveGitExecutable() {
+        String envGit = System.getenv("GIT_EXECUTABLE");
+        String[] candidates = {
+                envGit,
+                "/opt/homebrew/bin/git",
+                "/usr/local/bin/git",
+                "/usr/bin/git"
+        };
+        for (String candidate : candidates) {
+            if (candidate == null || candidate.trim().isEmpty()) {
+                continue;
+            }
+            File file = new File(candidate.trim());
+            if (file.isFile() && file.canExecute()) {
+                return file.getAbsolutePath();
+            }
+        }
+        return "git";
+    }
+
     public static void getClone(String gitRep, String targetDir)  {
         try {
-            // 执行 git clone 命令
-            ProcessBuilder pb = new ProcessBuilder();
-            pb.directory(new File(targetDir));
-            pb.command("git", "clone", gitRep);
+            ProcessBuilder pb = gitProcess(new File(targetDir), true, "clone", gitRep);
             Process process = pb.start();
-            // 打印执行过程中的输出
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    System.out.println(line);
-                }
-            }
+            printProcessOutput(process);
             int exitCode = process.waitFor();
             if (exitCode == 0) {
                 System.out.println("Git clone " + gitRep + " 成功！");
@@ -40,26 +57,44 @@ public class GitUtil {
     }
 
     public static void getSubModuleClone(String gitRep, String targetDir, String moduleName) {
-
         try {
-            // 执行 git clone 命令
-            ProcessBuilder pb = new ProcessBuilder();
-            pb.directory(new File(targetDir));
-            pb.command("git","submodule", "add", gitRep, moduleName);
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
-            // 打印执行过程中的输出
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    System.out.println(line);
-                }
+            File workDir = new File(targetDir);
+            File moduleDir = new File(workDir, moduleName);
+            if (isValidGitRepository(moduleDir.getAbsolutePath())) {
+                System.out.println("子模块已存在，跳过：" + moduleDir.getAbsolutePath());
+                return;
             }
+            File gitRoot = findGitRoot(workDir);
+            if (gitRoot == null) {
+                System.out.println("不是 git 仓库，无法拉取子模块：" + targetDir);
+                return;
+            }
+            String relPath = gitRoot.toPath().toAbsolutePath().normalize()
+                    .relativize(moduleDir.toPath().toAbsolutePath().normalize())
+                    .toString().replace('\\', '/');
+            int initCode = runGit(gitRoot, "git", "submodule", "update", "--init", "--", relPath);
+            if (initCode == 0 && isValidGitRepository(moduleDir.getAbsolutePath())) {
+                System.out.println("Git submodule init " + moduleName + " 成功！");
+                return;
+            }
+            System.out.println("submodule update --init 未完成，尝试 submodule add：" + gitRep);
+            ProcessBuilder pb = gitProcess(workDir, true, "submodule", "add", gitRep, moduleName);
+            Process process = pb.start();
+            printProcessOutput(process);
             int exitCode = process.waitFor();
-            if (exitCode == 0) {
+            if (exitCode == 0 && isValidGitRepository(moduleDir.getAbsolutePath())) {
+                System.out.println("Git clone " + gitRep + " 成功！");
+                return;
+            }
+            System.out.println("submodule add 未完成，改为 clone：" + gitRep);
+            ProcessBuilder clonePb = gitProcess(workDir, true, "clone", gitRep, moduleName);
+            Process cloneProcess = clonePb.start();
+            printProcessOutput(cloneProcess);
+            int cloneCode = cloneProcess.waitFor();
+            if (cloneCode == 0) {
                 System.out.println("Git clone " + gitRep + " 成功！");
             } else {
-                System.out.println("Git clone " + gitRep + " 失败，退出码：" + exitCode);
+                System.out.println("Git clone " + gitRep + " 失败，退出码：" + cloneCode);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -95,10 +130,7 @@ public class GitUtil {
             }
 
             // 检查是否有远程分支
-            ProcessBuilder pb = new ProcessBuilder();
-            pb.directory(dir);
-            pb.command("git", "remote", "-v");
-            pb.redirectErrorStream(true);
+            ProcessBuilder pb = gitProcess(dir, false, "remote", "-v");
             Process process = pb.start();
 
             StringBuilder output = new StringBuilder();
@@ -144,16 +176,9 @@ public class GitUtil {
                 System.out.println("======开始更新：" + repoDir);
             }
             
-            // 执行 git pull 命令
-            ProcessBuilder pb = new ProcessBuilder();
-            pb.directory(dir);
-            if (hasSubmodules) {
-                // 对于包含 submodule 的仓库，使用 --recurse-submodules 参数
-                pb.command("git", "pull", "--recurse-submodules");
-            } else {
-                pb.command("git", "pull");
-            }
-            pb.redirectErrorStream(true);
+            ProcessBuilder pb = hasSubmodules
+                    ? gitProcess(dir, false, "pull", "--recurse-submodules")
+                    : gitProcess(dir, false, "pull");
             Process process = pb.start();
             
             // 打印执行过程中的输出
@@ -172,10 +197,8 @@ public class GitUtil {
                 System.out.println("------检查并更新 submodules：" + repoDir);
                 
                 // 使用 foreach 遍历所有子模块并更新
-                ProcessBuilder pb2 = new ProcessBuilder();
-                pb2.directory(dir);
-                pb2.command("git", "submodule", "foreach", "git", "pull", "origin", "HEAD");
-                pb2.redirectErrorStream(true);
+                ProcessBuilder pb2 = gitProcess(dir, false,
+                        "submodule", "foreach", resolveGitExecutable(), "pull", "origin", "HEAD");
                 Process process2 = pb2.start();
                 
                 int updatedCount = 0;
@@ -369,10 +392,8 @@ public class GitUtil {
     }
 
     private static List<String> listOriginRemoteShortRefs(File dir) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder(
-                "git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/");
-        pb.directory(dir);
-        pb.redirectErrorStream(true);
+        ProcessBuilder pb = gitProcess(dir, false,
+                "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/");
         Process process = pb.start();
         List<String> out = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(
@@ -421,9 +442,7 @@ public class GitUtil {
 
     /** {@code git rev-parse --abbrev-ref HEAD} 在分离 HEAD 时为字面量 {@code HEAD} */
     private static boolean isOnNamedBranch(File dir) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder("git", "rev-parse", "--abbrev-ref", "HEAD");
-        pb.directory(dir);
-        pb.redirectErrorStream(true);
+        ProcessBuilder pb = gitProcess(dir, false, "rev-parse", "--abbrev-ref", "HEAD");
         Process process = pb.start();
         String line;
         try (BufferedReader reader = new BufferedReader(
@@ -435,10 +454,61 @@ public class GitUtil {
     }
 
     private static int runGit(File dir, String... command) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder(command);
-        pb.directory(dir);
-        pb.redirectErrorStream(true);
+        String[] args = command;
+        if (command.length > 0 && "git".equals(command[0])) {
+            args = Arrays.copyOfRange(command, 1, command.length);
+        }
+        ProcessBuilder pb = gitProcess(dir, false, args);
         Process process = pb.start();
+        printProcessOutput(process);
+        return process.waitFor();
+    }
+
+    private static ProcessBuilder gitProcess(File workDir, boolean createIfMissing, String... gitArgs) {
+        String[] command = new String[gitArgs.length + 1];
+        command[0] = resolveGitExecutable();
+        System.arraycopy(gitArgs, 0, command, 1, gitArgs.length);
+        ProcessBuilder pb = new ProcessBuilder(command);
+        if (workDir != null) {
+            if (createIfMissing) {
+                ensureDirectory(workDir);
+            }
+            pb.directory(workDir);
+        }
+        pb.redirectErrorStream(true);
+        Map<String, String> env = pb.environment();
+        String path = env.get("PATH");
+        String extra = "/opt/homebrew/bin" + File.pathSeparator + "/usr/local/bin"
+                + File.pathSeparator + "/usr/bin" + File.pathSeparator + "/bin";
+        env.put("PATH", extra + (path == null || path.isEmpty() ? "" : File.pathSeparator + path));
+        return pb;
+    }
+
+    static void ensureDirectory(File dir) {
+        if (dir == null) {
+            return;
+        }
+        if (!dir.exists() && !dir.mkdirs()) {
+            throw new IllegalStateException("无法创建目录：" + dir.getAbsolutePath());
+        }
+        if (!dir.isDirectory()) {
+            throw new IllegalStateException("不是目录：" + dir.getAbsolutePath());
+        }
+    }
+
+    private static File findGitRoot(File dir) {
+        File current = dir == null ? null : dir.getAbsoluteFile();
+        while (current != null) {
+            File git = new File(current, ".git");
+            if (git.exists()) {
+                return current;
+            }
+            current = current.getParentFile();
+        }
+        return null;
+    }
+
+    private static void printProcessOutput(Process process) throws Exception {
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
@@ -446,6 +516,5 @@ public class GitUtil {
                 System.out.println(line);
             }
         }
-        return process.waitFor();
     }
 }

@@ -29,7 +29,10 @@ public enum DbInitCategory {
     DXASSET("dxasset", "资管代销", DbInitTarget.PUB_DATABASE + ",dxassettrans1,dxassettrans2"),
 
     /** 信托代销：pub 刷 lcptpub，trans 刷 dxtrusttrans1/2 */
-    DXTRUST("dxtrust", "信托代销", DbInitTarget.PUB_DATABASE + ",dxtrusttrans1,dxtrusttrans2");
+    DXTRUST("dxtrust", "信托代销", DbInitTarget.PUB_DATABASE + ",dxtrusttrans1,dxtrusttrans2"),
+
+    /** 理财：pub 刷 lcptpub，trans 刷 finatrans1/2 */
+    FINA("fina", "理财", DbInitTarget.PUB_DATABASE + ",finatrans1,finatrans2");
 
     private final String code;
 
@@ -72,7 +75,7 @@ public enum DbInitCategory {
             DbInitCategory category = fromCode(normalized);
             if (category == null) {
                 throw new IllegalArgumentException("不支持的数据库种类: " + code
-                        + "，可选值: pub,dxfund,dxasset,dxtrust");
+                        + "，可选值: pub,dxfund,dxasset,dxtrust,fina");
             }
             result.add(category);
         }

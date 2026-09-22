@@ -39,7 +39,7 @@ public class HundsunServiceImpl {
             "ifmcounter","ifmcounter-dxasset","ifmcounter-dxfund","ifmcounter-dxtrust");
 
     public static List<String> HUI_LIST = Arrays.asList(
-            "HUI1.0", "console-dxasset-vue", "console-dxfund-vue","console-dxtrust-vue");
+            "HUI1.0", "console-dxasset-vue", "console-dxfund-vue", "console-dxtrust-vue", "console-fina-vue");
 
     /** spsql 路径中的版本号，如 IFMS6.0V202607.02.000、IFMS6.0V202405.05.056M2 */
     private static final Pattern SPSQL_VERSION_PATTERN =
@@ -300,7 +300,8 @@ public class HundsunServiceImpl {
         String basePathTemp = basePath;
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         map.forEach((key, value) -> {
-            List<String> list1 = Arrays.asList("HUI1.0", "console-dxasset-vue", "console-dxfund-vue","console-dxtrust-vue",
+            List<String> list1 = Arrays.asList("HUI1.0", "console-dxasset-vue", "console-dxfund-vue",
+                    "console-dxtrust-vue", "console-fina-vue",
                     "ifmcounter","ifmcounter-dxasset","ifmcounter-dxfund","ifmcounter-dxtrust");
             if (list1.contains(key)) {
                 return;
@@ -343,7 +344,7 @@ public class HundsunServiceImpl {
                 // lcpt-sale
                 file = new File(basePathTemp + "lcpt-server"
                         + File.separator +"sale"+File.separator+ key);
-                list = Arrays.asList("lcpt-pub", "lcpt-dxtrust", "lcpt-dxfund","lcpt-dxasset");
+                list = Arrays.asList("lcpt-pub", "lcpt-dxtrust", "lcpt-dxfund","lcpt-dxasset","lcpt-fina");
                 if (list.contains(key) && !file.exists()) {
                     System.out.println("======下载" + key);
                     // 使用git clone下载代码
@@ -419,12 +420,12 @@ public class HundsunServiceImpl {
     }
 
     private static void initGitSourcePath(String basePath) {
-        // FileUtil.mkdir(Paths.get(basePath + "lcpt-server" + File.separator + "pub"));
-        // FileUtil.mkdir(Paths.get(basePath + "lcpt-server" + File.separator + "sale"));
-        // FileUtil.mkdir(Paths.get(basePath + "spsql"));
-        // FileUtil.mkdir(Paths.get(basePath + "sql"));
-        // FileUtil.mkdir(Paths.get(basePath + "lcpt-server"
-        //         + File.separator + "sale" + File.separator + "lcpt-web"));
+        FileUtil.mkdir(Paths.get(basePath + "lcpt-server" + File.separator + "pub"));
+        FileUtil.mkdir(Paths.get(basePath + "lcpt-server" + File.separator + "sale"));
+        FileUtil.mkdir(Paths.get(basePath + "spsql"));
+        FileUtil.mkdir(Paths.get(basePath + "sql"));
+        FileUtil.mkdir(Paths.get(basePath + "lcpt-server"
+                + File.separator + "sale" + File.separator + "lcpt-web"));
 
     }
 
@@ -435,31 +436,29 @@ public class HundsunServiceImpl {
         if (!basePath.endsWith(File.separator)) {
             basePath += File.separator;
         }
-        String basePathTemp = basePath;
-        // 获取下载地址
+        File frontDir = new File(basePath + "lcpt-front");
+        File huiDir = new File(frontDir, "HUI1.0");
+        File bizDir = new File(huiDir, "console" + File.separator + "src" + File.separator + "biz");
         Map<String, String> map = ExcelUtil.readExcel("git.xlsx");
-        map.forEach((key,value)->{
-            File file = new File(basePathTemp + "lcpt-front");
-            if ("HUI1.0".equals(key) && !file.exists()) {
+        map.forEach((key, value) -> {
+            if ("HUI1.0".equals(key) && !GitUtil.isValidGitRepository(huiDir.getAbsolutePath())) {
                 System.out.println("======下载" + key);
-                // 使用git clone下载代码
-                GitUtil.getClone(value, basePathTemp + "lcpt-front");
+                GitUtil.getClone(value, frontDir.getAbsolutePath());
             }
         });
-
-        map.forEach((key,value)->{
-            List<String> list = Arrays.asList("console-dxfund-vue", "console-dxtrust-vue", "console-dxasset-vue");
-            File file = new File(basePathTemp + "lcpt-front" + File.separator + "HUI1.0" + File.separator
-                    + "console" + File.separator + "src" + File.separator + "biz" + File.separator + key);
-            if (list.contains(key) && !file.exists()) {
+        if (!GitUtil.isValidGitRepository(huiDir.getAbsolutePath())) {
+            System.out.println("HUI1.0 未下载成功，跳过前端子模块");
+            return;
+        }
+        List<String> list = Arrays.asList("console-dxfund-vue", "console-dxtrust-vue",
+                "console-dxasset-vue", "console-fina-vue");
+        map.forEach((key, value) -> {
+            File file = new File(bizDir, key);
+            if (list.contains(key) && !GitUtil.isValidGitRepository(file.getAbsolutePath())) {
                 System.out.println("======下载" + key);
-                GitUtil.getSubModuleClone(value,
-                        basePathTemp + "lcpt-front" + File.separator + "HUI1.0" + File.separator
-                                + "console" + File.separator + "src" + File.separator + "biz",
-                        key);
+                GitUtil.getSubModuleClone(value, bizDir.getAbsolutePath(), key);
             }
         });
-
     }
 
     public void getGitCounterSourceCode(String basePath) {
@@ -757,7 +756,8 @@ public class HundsunServiceImpl {
 
     private String getOriginRemote(String repoPath) {
         try {
-            ProcessBuilder processBuilder = new ProcessBuilder("git", "config", "--get", "remote.origin.url");
+            ProcessBuilder processBuilder = new ProcessBuilder(
+                    GitUtil.resolveGitExecutable(), "config", "--get", "remote.origin.url");
             processBuilder.directory(new File(repoPath));
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();

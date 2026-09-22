@@ -22,7 +22,7 @@ import java.util.Set;
  */
 public class DbInitTarget {
 
-    /** 公共库：承载 sql-pub 及基金/资管/信托 pub 脚本 */
+    /** 公共库：承载 sql-pub 及基金/资管/信托/理财 pub 脚本 */
     public static final String PUB_DATABASE = "lcptpub";
 
     private static final String PUB_SQL_PUB = "sql-pub/pub/pub";
@@ -33,11 +33,15 @@ public class DbInitTarget {
 
     private static final String PUB_SQL_DXTRUST = "sql-dxtrust/pub/dxtrust";
 
+    private static final String PUB_SQL_FINA = "sql-fina/pub/fina";
+
     private static final String TRANS_SQL_DXFUND = "sql-dxfund/trans/dxfund";
 
     private static final String TRANS_SQL_DXASSET = "sql-dxasset/trans/dxasset";
 
     private static final String TRANS_SQL_DXTRUST = "sql-dxtrust/trans/dxtrust";
+
+    private static final String TRANS_SQL_FINA = "sql-fina/trans/fina";
 
     private final String databaseName;
 
@@ -100,6 +104,11 @@ public class DbInitTarget {
             append(builderMap, "dxtrusttrans1", TRANS_SQL_DXTRUST, true);
             append(builderMap, "dxtrusttrans2", TRANS_SQL_DXTRUST, true);
         }
+        if (categories.contains(DbInitCategory.FINA)) {
+            appendPubModule(builderMap, PUB_SQL_FINA, false);
+            append(builderMap, "finatrans1", TRANS_SQL_FINA, true);
+            append(builderMap, "finatrans2", TRANS_SQL_FINA, true);
+        }
 
         List<DbInitTarget> targets = new ArrayList<>();
         for (TargetBuilder builder : builderMap.values()) {
@@ -121,7 +130,7 @@ public class DbInitTarget {
      */
     public static List<String> allPubModulePaths() {
         return Collections.unmodifiableList(Arrays.asList(
-                PUB_SQL_PUB, PUB_SQL_DXFUND, PUB_SQL_DXASSET, PUB_SQL_DXTRUST
+                PUB_SQL_PUB, PUB_SQL_DXFUND, PUB_SQL_DXASSET, PUB_SQL_DXTRUST, PUB_SQL_FINA
         ));
     }
 

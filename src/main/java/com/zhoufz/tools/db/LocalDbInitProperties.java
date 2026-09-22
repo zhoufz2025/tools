@@ -34,7 +34,7 @@ public class LocalDbInitProperties {
     private boolean autoInitOnStart = false;
 
     /**
-     * 默认刷新的数据库种类，逗号分隔：pub,dxfund,dxasset,dxtrust
+     * 默认刷新的数据库种类，逗号分隔：pub,dxfund,dxasset,dxtrust,fina
      * 未传参时使用该配置
      */
     private String categories = "pub,dxfund,dxasset,dxtrust";

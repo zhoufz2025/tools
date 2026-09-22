@@ -56,15 +56,28 @@ public class MysqlCliExecutor {
                 // 存储过程等含 DELIMITER 的脚本原样执行
             } else {
                 String sql = SqlScriptSanitizer.readAndStripComments(sqlFile);
+                SqlTemplateStatementFilter.FilterResult placeholderResult =
+                        SqlPlaceholderStatementFilter.filter(sql);
+                if (placeholderResult.isFiltered()) {
+                    skippedStatements += placeholderResult.getSkippedStatements();
+                    filtered = true;
+                    if (!placeholderResult.hasExecutableSql()) {
+                        return ScriptExecutionResult.skippedFile(skippedStatements);
+                    }
+                    sql = placeholderResult.getSql();
+                }
                 if (filterTaTemplate && SqlTemplateStatementFilter.containsTaTemplateMarker(sql)) {
                     SqlTemplateStatementFilter.FilterResult filterResult =
                             SqlTemplateStatementFilter.filter(sql);
-                    skippedStatements = filterResult.getSkippedStatements();
-                    filtered = filterResult.isFiltered();
+                    skippedStatements += filterResult.getSkippedStatements();
+                    filtered = filterResult.isFiltered() || filtered;
                     if (!filterResult.hasExecutableSql()) {
                         return ScriptExecutionResult.skippedFile(skippedStatements);
                     }
                     sql = filterResult.getSql();
+                }
+                if (!filterTaTemplate) {
+                    sql = SqlScriptSanitizer.rewriteInsertToIgnore(sql);
                 }
                 tempFile = Files.createTempFile("lcpt-sql-prepared-", ".sql");
                 Files.write(tempFile, sql.getBytes(StandardCharsets.UTF_8));

@@ -58,4 +58,32 @@ public class SqlScriptSanitizerTest {
         Assert.assertFalse("孤立 */ 应被移除", stripped.contains("*/"));
         Assert.assertTrue(stripped.contains("update tsys_subtrans"));
     }
+
+    @Test
+    public void rewriteInsertToIgnore_convertsInsertInto() {
+        String sql = "INSERT INTO tsys_subtrans VALUES ('a','b');\ninsert into tbparam values (1);";
+        String rewritten = SqlScriptSanitizer.rewriteInsertToIgnore(sql);
+        Assert.assertEquals("INSERT IGNORE INTO tsys_subtrans VALUES ('a','b');\nINSERT IGNORE INTO tbparam values (1);",
+                rewritten);
+    }
+
+    @Test
+    public void rewriteInsertToIgnore_keepsExistingIgnore() {
+        String sql = "INSERT IGNORE INTO tbparam VALUES (1);";
+        Assert.assertEquals("INSERT IGNORE INTO tbparam VALUES (1);",
+                SqlScriptSanitizer.rewriteInsertToIgnore(sql));
+    }
+
+    @Test
+    public void gbkInitdataShouldBeReadableWithoutMalformedException() throws Exception {
+        Path sqlFile = Paths.get(
+                "/Users/zhoufz/hundsun/lcpt60/git/Sources/app/sql/sql-fina/pub/fina/base/initdata/tbparam需要确认后执行的参数.sql");
+        if (!Files.exists(sqlFile)) {
+            return;
+        }
+        Assert.assertFalse(SqlScriptSanitizer.containsDelimiter(sqlFile));
+        String content = SqlScriptSanitizer.readSqlContent(sqlFile);
+        Assert.assertTrue(content.contains("FINA_AMT_FLAG"));
+        Assert.assertTrue(content.contains("扣款日"));
+    }
 }

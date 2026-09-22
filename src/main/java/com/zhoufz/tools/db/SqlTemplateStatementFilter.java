@@ -1,8 +1,6 @@
 package com.zhoufz.tools.db;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -22,15 +20,7 @@ public class SqlTemplateStatementFilter {
      * 判断文件是否包含 ${TACODE} 模板占位符
      */
     public static boolean containsTaTemplateMarker(Path sqlFile) throws IOException {
-        try (java.io.BufferedReader reader = Files.newBufferedReader(sqlFile, StandardCharsets.UTF_8)) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (containsTaTemplateMarker(line)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return containsTaTemplateMarker(SqlScriptSanitizer.readSqlContent(sqlFile));
     }
 
     public static boolean containsTaTemplateMarker(String sql) {
@@ -75,11 +65,12 @@ public class SqlTemplateStatementFilter {
      * 过滤含 ${TACODE} 的语句；含 DELIMITER 的脚本原样返回（由调用方保证不含模板）
      */
     public static FilterResult filter(Path sqlFile) throws IOException {
-        List<String> lines = Files.readAllLines(sqlFile, StandardCharsets.UTF_8);
+        String content = SqlScriptSanitizer.readSqlContent(sqlFile);
+        List<String> lines = java.util.Arrays.asList(content.split("\n", -1));
         if (containsDelimiter(lines)) {
-            return FilterResult.unfiltered(String.join("\n", lines) + "\n");
+            return FilterResult.unfiltered(content.endsWith("\n") ? content : content + "\n");
         }
-        return filter(String.join("\n", lines) + "\n");
+        return filter(content.endsWith("\n") ? content : content + "\n");
     }
 
     private static boolean containsDelimiter(List<String> lines) {
@@ -114,7 +105,7 @@ public class SqlTemplateStatementFilter {
 
         private final boolean filtered;
 
-        private FilterResult(String sql, int keptStatements, int skippedStatements, boolean filtered) {
+        FilterResult(String sql, int keptStatements, int skippedStatements, boolean filtered) {
             this.sql = sql;
             this.keptStatements = keptStatements;
             this.skippedStatements = skippedStatements;

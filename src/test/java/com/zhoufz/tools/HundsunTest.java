@@ -5,9 +5,6 @@ import com.zhoufz.tools.service.HundsunServiceImpl;
 import org.junit.Test;
 
 import java.io.IOException;
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.Date;
 
 /**
  * @author zhoufz
@@ -34,7 +31,7 @@ public class HundsunTest {
     @Test
     public void getGitSourceCode() {
         HundsunServiceImpl service = new HundsunServiceImpl();
-        String basePath = "F:\\提交\\Sources\\app";
+        String basePath = "/Users/zhoufz/hundsun/lcpt60/commitGit/Sources/app";
         service.getGitSourceCode(basePath);
     }
     
@@ -45,28 +42,28 @@ public class HundsunTest {
     @Test
     public void getProjectGitSourceCode() {
         HundsunServiceImpl service = new HundsunServiceImpl();
-        String basePath = "F:\\ProjectSource";
+        String basePath = "/Users/zhoufz/hundsun/lcpt60/project";
         service.getProjectGitSourceCode(basePath);
     }
 
     @Test
     public void getGitHuiSourceCode() {
         HundsunServiceImpl service = new HundsunServiceImpl();
-        String basePath = "F:\\提交\\Sources";
+        String basePath = "/Users/zhoufz/hundsun/lcpt60/commitGit/Sources";
         service.getGitHuiSourceCode(basePath);
     }
 
     @Test
     public void getGitCounterSourceCode() {
         HundsunServiceImpl service = new HundsunServiceImpl();
-        String basePath = "F:\\提交\\Sources";
+        String basePath = "/Users/zhoufz/hundsun/lcpt60/commitGit/Sources";
         service.getGitCounterSourceCode(basePath);
     }
 
     @Test
     public void getBackUpConfigFile() throws IOException {
-        String sourceRoot = "F:\\提交\\Sources\\app";
-        String targetRoot = "F:\\AppSource\\backup20260825";
+        String sourceRoot = "/Users/zhoufz/hundsun/lcpt60/project/lcpt-qhyh_dxfund";
+        String targetRoot = "/Users/zhoufz/hundsun/lcpt60/config/project/lcpt-qhyh_dxfund/20260922";
         HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
         fileService.backupFiles(sourceRoot,targetRoot);
 
@@ -74,11 +71,24 @@ public class HundsunTest {
     
     @Test
     public void getRestoreFiles() throws IOException {
-        String sourceRoot = "F:\\AppSource\\Sources\\app";
-        String targetRoot = "F:\\AppSource\\backup20260825";
+        // 快照目录（config/app、config/20260828）与工程 app 对齐，不要把 sourceRoot 再下探到 lcpt-server
+        // 覆盖 config/app → 工程：sourceRoot=.../git/Sources/app，targetRoot=.../config/app
+        // 错误示例：sourceRoot=.../app/lcpt-server + targetRoot=.../config → 多出 lcpt-server/app/
+        String sourceRoot = "/Users/zhoufz/hundsun/lcpt60/git/Sources/app";
+        String targetRoot = "/Users/zhoufz/hundsun/lcpt60/config/20260828";
         HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
         fileService.restoreFiles(sourceRoot,targetRoot);
         
+    }
+
+    /**
+     * 删除工程下所有 Maven target 目录（编译产物）
+     */
+    @Test
+    public void deleteTargetDirs() throws IOException {
+        String sourceRoot = "/Users/zhoufz/hundsun/lcpt60/git/Sources/app";
+        HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
+        fileService.deleteTargetDirs(sourceRoot);
     }
 
     /**

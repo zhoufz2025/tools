@@ -34,6 +34,9 @@ public class HundsunConfigFileServiceImpl {
     /** classpath 中待备份/还原的绝对路径列表文件 */
     private static final String BACKUP_LIST_FILE = "backUpFile.txt";
 
+    /** 不备份、不还原：Maven target、前端/打包产物 dist */
+    private static final List<String> SKIP_BUILD_DIR_NAMES = Arrays.asList("target", "dist");
+
     /**
      * 从 sourceRoot 复制指定的配置文件到 targetRoot，保持相对路径结构
      * @param sourceRoot 源目录
@@ -48,8 +51,8 @@ public class HundsunConfigFileServiceImpl {
         Files.walkFileTree(sourcePath, new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                // 跳过 Maven/编译产物目录
-                if (isTargetDir(dir)) {
+                // 跳过 Maven target、打包产物 dist
+                if (isSkippedBuildDir(dir)) {
                     return FileVisitResult.SKIP_SUBTREE;
                 }
                 return FileVisitResult.CONTINUE;
@@ -89,7 +92,7 @@ public class HundsunConfigFileServiceImpl {
         Files.walkFileTree(targetPath, new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                if (isTargetDir(dir)) {
+                if (isSkippedBuildDir(dir)) {
                     return FileVisitResult.SKIP_SUBTREE;
                 }
                 return FileVisitResult.CONTINUE;
@@ -104,7 +107,7 @@ public class HundsunConfigFileServiceImpl {
                 }
                 if (shouldBackup(file, targetPath)) {
                     Path relativePath = targetPath.relativize(file);
-                    Path sourceFile = sourcePath.resolve(relativePath);
+                    Path sourceFile = resolveRestoreTarget(sourcePath, relativePath);
 
                     Files.createDirectories(sourceFile.getParent());
                     Files.copy(file, sourceFile, StandardCopyOption.REPLACE_EXISTING);
@@ -178,6 +181,117 @@ public class HundsunConfigFileServiceImpl {
     }
 
     /**
+     * 删除 sourceRoot 下所有名为 target 的 Maven 编译产物目录（含目录本身）。
+     *
+     * @param sourceRoot 扫描根目录
+     * @return 已删除的 target 目录路径
+     */
+    public List<String> deleteTargetDirs(String sourceRoot) throws IOException {
+        List<String> deletedDirs = new ArrayList<>();
+        Path sourcePath = Paths.get(sourceRoot);
+        if (!Files.isDirectory(sourcePath)) {
+            throw new IOException("源目录不存在: " + sourceRoot);
+        }
+        Files.walkFileTree(sourcePath, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                if (isDistDir(dir)) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                if (isMavenTargetDir(dir) && !dir.equals(sourcePath)) {
+                    deleteRecursively(dir);
+                    String path = dir.toAbsolutePath().toString();
+                    System.out.println("[DELETE][TARGET] " + path);
+                    deletedDirs.add(path);
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        System.out.println("[DELETE][TARGET] done, count=" + deletedDirs.size());
+        return deletedDirs;
+    }
+
+    private static boolean isMavenTargetDir(Path dir) {
+        Path name = dir.getFileName();
+        return name != null && "target".equalsIgnoreCase(name.toString());
+    }
+
+    private static boolean isDistDir(Path dir) {
+        Path name = dir.getFileName();
+        return name != null && "dist".equalsIgnoreCase(name.toString());
+    }
+
+    private static void deleteRecursively(Path dir) throws IOException {
+        Files.walkFileTree(dir, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.deleteIfExists(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path directory, IOException exc) throws IOException {
+                if (exc != null) {
+                    throw exc;
+                }
+                Files.deleteIfExists(directory);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    /**
+     * 将备份相对路径接到还原根目录。若还原根末级名已出现在相对路径中
+     *（例如 dest=.../lcpt-server，relative=app/lcpt-server/sale/... 或 lcpt-server/sale/...），
+     * 则剥掉该目录名及其前面的快照前缀（app、YYYYMMDD），避免套一层多余目录。
+     */
+    public static Path resolveRestoreTarget(Path destRoot, Path relativeFromBackup) {
+        if (relativeFromBackup.getNameCount() == 0) {
+            return destRoot;
+        }
+        Path destName = destRoot.getFileName();
+        if (destName == null) {
+            return destRoot.resolve(relativeFromBackup);
+        }
+        String dest = destName.toString();
+        int matchIndex = -1;
+        int i = 0;
+        for (Path part : relativeFromBackup) {
+            if (dest.equals(part.toString())) {
+                matchIndex = i;
+                break;
+            }
+            i++;
+        }
+        if (matchIndex < 0) {
+            return destRoot.resolve(relativeFromBackup);
+        }
+        if (matchIndex > 0) {
+            for (int j = 0; j < matchIndex; j++) {
+                if (!isBackupSnapshotDir(relativeFromBackup.getName(j).toString())) {
+                    return destRoot.resolve(relativeFromBackup);
+                }
+            }
+        }
+        if (matchIndex + 1 >= relativeFromBackup.getNameCount()) {
+            return destRoot;
+        }
+        Path suffix = relativeFromBackup.subpath(matchIndex + 1, relativeFromBackup.getNameCount());
+        System.out.println("[RESTORE][MAP] " + relativeFromBackup + " → " + suffix
+                + " (dest already ends with " + dest + ")");
+        return destRoot.resolve(suffix);
+    }
+
+    /** 备份根下的快照目录名：日期目录 20260828，或历史快照 app / ifmcounter */
+    static boolean isBackupSnapshotDir(String name) {
+        if ("app".equals(name) || "ifmcounter".equals(name)) {
+            return true;
+        }
+        return name != null && name.matches("\\d{8}");
+    }
+
+    /**
      * 将绝对路径转为备份目录下的相对路径（去掉盘符，如 F:\a\b → a\b）
      */
     private static Path toBackupRelativePath(Path absolutePath) {
@@ -190,21 +304,32 @@ public class HundsunConfigFileServiceImpl {
     }
 
     /**
-     * 判断是否为编译产物目录（Maven/Gradle 的 target）
+     * 判断是否为编译/打包产物目录（target、dist）
      */
-    private static boolean isTargetDir(Path dir) {
+    private static boolean isSkippedBuildDir(Path dir) {
         Path name = dir.getFileName();
-        return name != null && "target".equalsIgnoreCase(name.toString());
+        if (name == null) {
+            return false;
+        }
+        String dirName = name.toString();
+        for (String skip : SKIP_BUILD_DIR_NAMES) {
+            if (skip.equalsIgnoreCase(dirName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
-     * 路径中是否包含 target 目录段（编译产物路径应排除）
+     * 路径中是否包含 target / dist 目录段（产物路径应排除）
      */
-    private static boolean containsTargetDir(Path file, Path root) {
+    private static boolean containsSkippedBuildDir(Path file, Path root) {
         Path relative = root.relativize(file);
         for (Path part : relative) {
-            if ("target".equalsIgnoreCase(part.toString())) {
-                return true;
+            for (String skip : SKIP_BUILD_DIR_NAMES) {
+                if (skip.equalsIgnoreCase(part.toString())) {
+                    return true;
+                }
             }
         }
         return false;
@@ -224,10 +349,10 @@ public class HundsunConfigFileServiceImpl {
     }
 
     /**
-     * 判断文件是否在备份名单中（排除 target 目录下的文件）
+     * 判断文件是否在备份名单中（排除 target、dist 目录下的文件）
      */
     private static boolean shouldBackup(Path file, Path root) {
-        if (containsTargetDir(file, root)) {
+        if (containsSkippedBuildDir(file, root)) {
             return false;
         }
         String fileName = file.getFileName().toString();

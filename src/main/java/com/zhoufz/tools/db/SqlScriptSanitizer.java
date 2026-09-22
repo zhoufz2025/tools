@@ -1,10 +1,16 @@
 package com.zhoufz.tools.db;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * 清理 SQL 脚本中的注释，避免基线脚本里未配对的块注释结束符导致 MySQL 语法错误
@@ -13,14 +19,31 @@ import java.util.Locale;
  */
 public class SqlScriptSanitizer {
 
+    private static final Charset GBK = Charset.forName("GBK");
+
     private SqlScriptSanitizer() {
+    }
+
+    /**
+     * 读取 SQL 文件内容：优先 UTF-8，非法字节则回退 GBK（基线里部分 initdata 为 GBK）
+     */
+    public static String readSqlContent(Path sqlFile) throws IOException {
+        byte[] bytes = Files.readAllBytes(sqlFile);
+        CharsetDecoder utf8 = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        try {
+            return utf8.decode(ByteBuffer.wrap(bytes)).toString();
+        } catch (CharacterCodingException e) {
+            return GBK.decode(ByteBuffer.wrap(bytes)).toString();
+        }
     }
 
     /**
      * 是否包含 DELIMITER（存储过程脚本需原样交给 mysql 客户端）
      */
     public static boolean containsDelimiter(Path sqlFile) throws IOException {
-        for (String line : Files.readAllLines(sqlFile, StandardCharsets.UTF_8)) {
+        for (String line : readSqlContent(sqlFile).split("\n", -1)) {
             if (line.trim().toUpperCase(Locale.ROOT).startsWith("DELIMITER ")) {
                 return true;
             }
@@ -99,7 +122,20 @@ public class SqlScriptSanitizer {
     }
 
     public static String readAndStripComments(Path sqlFile) throws IOException {
-        String content = new String(Files.readAllBytes(sqlFile), StandardCharsets.UTF_8);
-        return stripComments(content);
+        return stripComments(readSqlContent(sqlFile));
     }
+
+    /**
+     * 将 INSERT INTO / INSERT IGNORE INTO 统一为 INSERT IGNORE INTO，
+     * 避免 initdata 写入已有 lcptpub 时因主键重复中断。
+     */
+    public static String rewriteInsertToIgnore(String sql) {
+        if (sql == null || sql.isEmpty()) {
+            return sql;
+        }
+        return INSERT_INTO_PATTERN.matcher(sql).replaceAll("INSERT IGNORE INTO");
+    }
+
+    private static final Pattern INSERT_INTO_PATTERN =
+            Pattern.compile("(?i)\\bINSERT(?:\\s+IGNORE)?\\s+INTO\\b");
 }
