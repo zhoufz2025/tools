@@ -62,6 +62,7 @@ public class LocalDbInitTest {
      * 仅刷理财 initdata（表结构已成功、中途失败后续跑这个，不要再跑 initFina）
      */
     @Test
+    @Ignore("会写库，确认后手动执行")
     public void initFinaData() {
         LocalDbInitResult result = localDbInitService.initData(EnumSet.of(DbInitCategory.FINA));
         printResult(result);

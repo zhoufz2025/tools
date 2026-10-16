@@ -101,7 +101,7 @@ public class HundsunConfigFileServiceImpl {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 // 还原时排除 pom，避免覆盖工程依赖与触发 IDEA Maven 自动导入
-                if (!"pom.xml".equalsIgnoreCase(file.getFileName().toString())) {
+                if ("pom.xml".equalsIgnoreCase(file.getFileName().toString())) {
                     System.out.println("[RESTORE][SKIP] " + file);
                     return FileVisitResult.CONTINUE;
                 }

@@ -2,6 +2,7 @@ package com.zhoufz.tools;
 
 import com.zhoufz.tools.service.HundsunServiceImpl;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 /**
@@ -9,23 +10,24 @@ import org.junit.Test;
  * @author zhoufz
  * 日期 2025/11/29
  */
+@Ignore("手工脚本，依赖本机路径与 git 仓库，勿纳入默认 mvn test")
 public class GitUpdateTest {
 
     /** 与 {@code src/main/resources/gitrep.txt} 中每行左侧键名一致，例如 lcpt-dxfund
      * HUI1.0-console-dxasset、spsql-dxasset、ifmcounter-dxfund、lcpt-web-manager-dxasset */
-    private static final String TARGET_REPO_KEY = "spsql-dxfund";
+    private static final String TARGET_REPO_KEY = "spsql-dxtrust";
 
     /** 要切换到的分支或标签名，例如 IFMS6.0V202607.00.005 */
-    private static final String TARGET_VERSION = "IFMS6.0V202607.00.016";
+    private static final String TARGET_VERSION = "IFMS6.0V202506.04.039";
 
     private static final String GITREP_TXT =
-            "F:\\git-tools\\tools\\src\\main\\resources\\gitrep.txt";
+            "/Users/zhoufz/hundsun/tools/src/main/resources/gitrep.txt";
 
     @Test
     public void getAllRepositories() {
         HundsunServiceImpl service = new HundsunServiceImpl();
-        String basePath = "F:\\提交\\Sources";
-        String outputPath = "F:\\git-tools\\tools\\src\\main\\resources\\gitrep.txt";
+        String basePath = "/Users/zhoufz/hundsun/lcpt60/commitGit/Sources";
+        String outputPath = GITREP_TXT;
         service.generateGitRepositoryMapping(basePath, outputPath);
     }
 

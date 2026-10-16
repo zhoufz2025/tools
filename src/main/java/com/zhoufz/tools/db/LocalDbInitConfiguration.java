@@ -20,6 +20,11 @@ public class LocalDbInitConfiguration {
     }
 
     @Bean
+    public ShardingViewService shardingViewService(LocalDbInitProperties properties) {
+        return new ShardingViewService(properties);
+    }
+
+    @Bean
     @ConditionalOnProperty(prefix = "local.db", name = "auto-init-on-start", havingValue = "true")
     public LocalDbInitRunner localDbInitRunner(LocalDbInitService localDbInitService) {
         return new LocalDbInitRunner(localDbInitService);

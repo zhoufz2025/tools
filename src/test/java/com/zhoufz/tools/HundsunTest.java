@@ -2,6 +2,7 @@ package com.zhoufz.tools;
 
 import com.zhoufz.tools.service.HundsunConfigFileServiceImpl;
 import com.zhoufz.tools.service.HundsunServiceImpl;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -10,8 +11,7 @@ import java.io.IOException;
  * @author zhoufz
  * 日期 2025/8/30
  */
-
-
+@Ignore("手工脚本，依赖本机 Windows 路径，勿纳入默认 mvn test")
 public class HundsunTest {
 
     @Test
@@ -62,8 +62,9 @@ public class HundsunTest {
 
     @Test
     public void getBackUpConfigFile() throws IOException {
-        String sourceRoot = "/Users/zhoufz/hundsun/lcpt60/project/lcpt-qhyh_dxfund";
-        String targetRoot = "/Users/zhoufz/hundsun/lcpt60/config/project/lcpt-qhyh_dxfund/20260922";
+        String sourceRoot = "/Users/zhoufz/hundsun/lcpt60/project/lcpt-huisyh/lcpt-server";
+        // String targetRoot = "/Users/zhoufz/hundsun/lcpt60/config/20261015";
+        String targetRoot = "/Users/zhoufz/hundsun/lcpt60/config/project/lcpt-huisyh/20261016";
         HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
         fileService.backupFiles(sourceRoot,targetRoot);
 
@@ -74,8 +75,8 @@ public class HundsunTest {
         // 快照目录（config/app、config/20260828）与工程 app 对齐，不要把 sourceRoot 再下探到 lcpt-server
         // 覆盖 config/app → 工程：sourceRoot=.../git/Sources/app，targetRoot=.../config/app
         // 错误示例：sourceRoot=.../app/lcpt-server + targetRoot=.../config → 多出 lcpt-server/app/
-        String sourceRoot = "/Users/zhoufz/hundsun/lcpt60/git/Sources/app";
-        String targetRoot = "/Users/zhoufz/hundsun/lcpt60/config/20260828";
+        String sourceRoot = "/Users/zhoufz/hundsun/lcpt60/project/lcpt-huisyh/lcpt-server";
+        String targetRoot = "/Users/zhoufz/hundsun/lcpt60/config/project/lcpt-huisyh/20260924";
         HundsunConfigFileServiceImpl fileService = new HundsunConfigFileServiceImpl();
         fileService.restoreFiles(sourceRoot,targetRoot);
         

@@ -1,5 +1,6 @@
 package com.zhoufz.tools;
 
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.BufferedReader;
@@ -13,7 +14,7 @@ import java.io.InputStreamReader;
  * @author zhoufz
  * 日期 2025/8/30
  */
-
+@Ignore("手工脚本，依赖本机固定文件路径，勿纳入默认 mvn test")
 public class ReadFileTest {
 
     @Test

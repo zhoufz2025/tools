@@ -7,6 +7,7 @@ import com.zhoufz.tools.service.ProjectProductTransplantService;
 import com.zhoufz.tools.service.TransplantBusiness;
 import com.zhoufz.tools.service.TransplantScope;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.EnumSet;
@@ -19,6 +20,7 @@ import java.util.EnumSet;
  * @author zhoufz
  * @date 20260705
  */
+@Ignore("手工脚本，依赖本机工程/产品路径，勿纳入默认 mvn test")
 public class ProjectProductTest {
 
     // ==================== 路径配置（USE_PROPERTIES_FILE=false 时生效） ====================

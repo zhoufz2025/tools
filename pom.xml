@@ -76,6 +76,12 @@
             <scope>test</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.junit.vintage</groupId>
+            <artifactId>junit-vintage-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+
 
 
     </dependencies>
@@ -95,6 +101,21 @@
                     </execution>
                 </executions>
             </plugin>
+            <!--<plugin>-->
+            <!--    <groupId>org.apache.maven.plugins</groupId>-->
+            <!--    <artifactId>maven-surefire-plugin</artifactId>-->
+            <!--    <version>3.2.5</version>-->
+            <!--    <configuration>-->
+            <!--        &lt;!&ndash; 手工/环境相关用例默认不跑；IDE 点单测或去掉 @Ignore 后再跑 &ndash;&gt;-->
+            <!--        <excludes>-->
+            <!--            <exclude>**/HundsunTest.java</exclude>-->
+            <!--            <exclude>**/GitUpdateTest.java</exclude>-->
+            <!--            <exclude>**/ReadFileTest.java</exclude>-->
+            <!--            <exclude>**/ProjectProductTest.java</exclude>-->
+            <!--            <exclude>**/LocalDbInitTest.java</exclude>-->
+            <!--        </excludes>-->
+            <!--    </configuration>-->
+            <!--</plugin>-->
         </plugins>
     </build>
 
