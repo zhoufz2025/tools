@@ -78,13 +78,23 @@ public class HundsunConfigFileServiceImpl {
     }
 
     /**
-     * 将 targetRoot 下的配置文件（log4j2.xml、application.properties、ServerStarter.java 等）
-     * 按原相对路径替换回 sourceRoot；还原时排除 pom.xml（备份仍可包含 pom）
-     * @param sourceRoot 目标目录（要被替换的目录）
-     * @param targetRoot 源目录（备份目录）
-     * @return 还原的文件列表
+     * 将 targetRoot 下的配置文件还原到 sourceRoot；默认跳过 pom.xml。
      */
     public List<String> restoreFiles(String sourceRoot, String targetRoot) throws IOException {
+        return restoreFiles(sourceRoot, targetRoot, false);
+    }
+
+    /**
+     * 将 targetRoot 下的配置文件（log4j2.xml、application.properties、ServerStarter.java 等）
+     * 按原相对路径替换回 sourceRoot。
+     *
+     * @param sourceRoot 目标目录（要被替换的目录）
+     * @param targetRoot 源目录（备份目录）
+     * @param restorePom 是否还原 pom.xml；false 时跳过（避免覆盖依赖、触发 IDEA Maven 导入）
+     * @return 还原的文件列表
+     */
+    public List<String> restoreFiles(String sourceRoot, String targetRoot, boolean restorePom)
+            throws IOException {
         List<String> restoredFiles = new ArrayList<>();
         Path sourcePath = Paths.get(sourceRoot);
         Path targetPath = Paths.get(targetRoot);
@@ -100,9 +110,8 @@ public class HundsunConfigFileServiceImpl {
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                // 还原时排除 pom，避免覆盖工程依赖与触发 IDEA Maven 自动导入
-                if ("pom.xml".equalsIgnoreCase(file.getFileName().toString())) {
-                    System.out.println("[RESTORE][SKIP] " + file);
+                if (!restorePom && "pom.xml".equalsIgnoreCase(file.getFileName().toString())) {
+                    System.out.println("[RESTORE][SKIP][pom] " + file);
                     return FileVisitResult.CONTINUE;
                 }
                 if (shouldBackup(file, targetPath)) {
@@ -118,7 +127,7 @@ public class HundsunConfigFileServiceImpl {
                 return FileVisitResult.CONTINUE;
             }
         });
-        
+
         return restoredFiles;
     }
 

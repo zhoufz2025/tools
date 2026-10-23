@@ -3,6 +3,7 @@ package com.zhoufz.tools.service;
 import com.zhoufz.tools.util.ExcelUtil;
 import com.zhoufz.tools.util.FileUtil;
 import com.zhoufz.tools.util.GitUtil;
+import com.zhoufz.tools.util.SvnUtil;
 import org.apache.logging.log4j.util.Strings;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -17,6 +18,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -53,7 +55,7 @@ public class HundsunServiceImpl {
      * 相对路径与原文件在各自模块下的目录结构一致。
      */
     public void gitReplaceSqlFile(String fileName) {
-        List<String> list = FileUtil.readFile(fileName);
+        List<String> list = readReplaceConfig(fileName);
         if (list == null || list.size() < 5) {
             throw new IllegalArgumentException("配置文件格式错误，至少需要5行");
         }
@@ -86,6 +88,41 @@ public class HundsunServiceImpl {
         } catch (IOException e) {
             throw new RuntimeException("gitReplaceSqlFile 执行失败", e);
         }
+    }
+
+    /**
+     * 优先读本机绝对路径；否则按 classpath 资源名读取（与 {@link FileUtil#readFile} 一致）。
+     */
+    private List<String> readReplaceConfig(String fileName) {
+        if (Strings.isBlank(fileName)) {
+            throw new IllegalArgumentException("配置文件不能为空");
+        }
+        File file = new File(fileName.trim());
+        if (file.isFile()) {
+            try {
+                List<String> list = new ArrayList<>();
+                for (String line : Files.readAllLines(file.toPath(), StandardCharsets.UTF_8)) {
+                    if (line.trim().isEmpty()) {
+                        continue;
+                    }
+                    if (line.contains("/") && !"/".equals(File.separator)) {
+                        line = line.replace("/", "\\");
+                    }
+                    if (line.contains("\\") && !"\\".equals(File.separator)) {
+                        line = line.replace("\\", "/");
+                    }
+                    list.add(line);
+                }
+                return list;
+            } catch (IOException e) {
+                throw new RuntimeException("读取配置文件失败: " + file.getAbsolutePath(), e);
+            }
+        }
+        List<String> classpath = FileUtil.readFile(fileName.trim());
+        if (classpath == null) {
+            throw new IllegalArgumentException("找不到配置文件: " + fileName);
+        }
+        return classpath;
     }
 
     private static String extractConfigValue(String line) {
@@ -176,7 +213,10 @@ public class HundsunServiceImpl {
     }
     
     public void svnReplaceSqlFile(String fileName) {
-        List<String> list = FileUtil.readFile(fileName);
+        List<String> list = readReplaceConfig(fileName);
+        if (list.size() < 6) {
+            throw new IllegalArgumentException("SVN 替换配置至少需要 6 行");
+        }
         String sourcePrefix = list.get(0), targetPrefix = list.get(1), scriptPrefix = list.get(2), vuePrefix = list.get(3);
         String taskId = list.get(4);
         taskId = taskId.substring(taskId.indexOf(":") + 1);
@@ -516,19 +556,21 @@ public class HundsunServiceImpl {
             return;
         }
 
-        // 检查当前目录是否是有效的git仓库
+        // 检查当前目录是否是有效的git仓库（含 submodule 的 .git 文件）
         File gitDir = new File(dir, ".git");
         if (gitDir.exists()) {
-            // 检查是否是有效的git仓库（有远程分支）
             if (GitUtil.isValidGitRepository(dir.getAbsolutePath())) {
-                repoPaths.add(dir.getAbsolutePath());
-                System.out.println("找到Git仓库：" + dir.getAbsolutePath());
-                // 如果是有效的git仓库，不再递归子目录（避免处理嵌套的git仓库）
+                String abs = dir.getAbsolutePath();
+                if (!repoPaths.contains(abs)) {
+                    repoPaths.add(abs);
+                    System.out.println("找到Git仓库：" + abs);
+                }
+                // HUI 等父仓：继续收集已初始化的 submodule（如 console/src/biz/console-dxfund-vue）
+                collectInitializedSubmodules(dir, repoPaths);
+                // 不再随意递归普通子目录，避免把父仓工作区目录当成独立仓
                 return;
-            } else {
-                // 如果是空的git仓库（无远程分支），继续扫描子目录
-                System.out.println("跳过空Git仓库（无远程分支）：" + dir.getAbsolutePath());
             }
+            System.out.println("跳过空Git仓库（无远程分支）：" + dir.getAbsolutePath());
         }
 
         // 递归查找子目录
@@ -549,10 +591,45 @@ public class HundsunServiceImpl {
     }
 
     /**
+     * 收集父仓 .gitmodules 中已初始化的 submodule，并递归其嵌套 submodule。
+     */
+    private void collectInitializedSubmodules(File parentRepo, List<String> repoPaths) {
+        List<String> subs = GitUtil.listInitializedSubmodulePaths(parentRepo.getAbsolutePath());
+        for (String subPath : subs) {
+            if (repoPaths.contains(subPath)) {
+                continue;
+            }
+            repoPaths.add(subPath);
+            System.out.println("找到Git submodule：" + subPath);
+            collectInitializedSubmodules(new File(subPath), repoPaths);
+        }
+    }
+
+    /**
      * 批量更新所有Git仓库代码
      * @param basePath 基础路径，例如：/Users/zhoufz/hundsun/lcpt60/git/Sources/
      */
     public void updateAllGitRepositories(String basePath) {
+        updateVcsRepositories(basePath, "Git", true, false);
+    }
+
+    /**
+     * 批量更新所有 SVN 工作副本（递归扫描含 .svn 的目录并执行 svn update）
+     *
+     * @param basePath 基础路径，例如：/Users/zhoufz/hundsun/lcpt60/svn/
+     */
+    public void updateAllSvnRepositories(String basePath) {
+        updateVcsRepositories(basePath, "SVN", false, true);
+    }
+
+    /**
+     * 在同一基础路径下先更新 Git，再更新 SVN。
+     */
+    public void updateAllGitAndSvnRepositories(String basePath) {
+        updateVcsRepositories(basePath, "Git+SVN", true, true);
+    }
+
+    private void updateVcsRepositories(String basePath, String title, boolean updateGit, boolean updateSvn) {
         if (Strings.isBlank(basePath)) {
             System.out.println("基础路径不能为空！");
             return;
@@ -567,24 +644,27 @@ public class HundsunServiceImpl {
             return;
         }
 
-        System.out.println("========== 开始批量更新所有Git仓库 ==========");
+        System.out.println("========== 开始批量更新所有" + title + "仓库 ==========");
         System.out.println("基础路径：" + basePath);
         System.out.println("扫描中...");
 
-        List<String> repoPaths = new ArrayList<>();
-        
-        // 递归查找所有Git仓库（最大深度5层，避免过深的目录结构）
-        findGitRepositories(baseDir, repoPaths, 5, 0);
+        List<String> gitPaths = new ArrayList<>();
+        List<String> svnPaths = new ArrayList<>();
+        if (updateGit) {
+            findGitRepositories(baseDir, gitPaths, 5, 0);
+        }
+        if (updateSvn) {
+            findSvnRepositories(baseDir, svnPaths, 5, 0);
+        }
 
-        if (repoPaths.isEmpty()) {
-            System.out.println("未找到任何Git仓库！");
+        if (gitPaths.isEmpty() && svnPaths.isEmpty()) {
+            System.out.println("未找到任何" + title + "仓库！");
             return;
         }
 
-        System.out.println("共找到 " + repoPaths.size() + " 个Git仓库");
+        System.out.println("共找到 Git=" + gitPaths.size() + "，SVN=" + svnPaths.size());
         System.out.println("开始更新...");
 
-        // 使用线程池并发更新
         ArrayBlockingQueue<Runnable> blockingQueue = new ArrayBlockingQueue<>(50);
         int corePoolSize = 5, maxPoolSize = 10, keepAliveTime = 30;
         ThreadPoolExecutor executor = new ThreadPoolExecutor(
@@ -595,17 +675,15 @@ public class HundsunServiceImpl {
                 blockingQueue);
 
         List<CompletableFuture<Boolean>> futures = new ArrayList<>();
-        
-        for (String repoPath : repoPaths) {
-            futures.add(CompletableFuture.supplyAsync(() -> {
-                return GitUtil.gitPull(repoPath);
-            }, executor));
+        for (String repoPath : gitPaths) {
+            futures.add(CompletableFuture.supplyAsync(() -> GitUtil.gitPull(repoPath), executor));
+        }
+        for (String repoPath : svnPaths) {
+            futures.add(CompletableFuture.supplyAsync(() -> SvnUtil.svnUpdate(repoPath), executor));
         }
 
-        // 等待所有更新完成
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        
-        // 统计结果
+
         long successCount = futures.stream().filter(f -> {
             try {
                 return f.get();
@@ -613,13 +691,219 @@ public class HundsunServiceImpl {
                 return false;
             }
         }).count();
-        
+
         executor.shutdown();
-        
+
+        int total = gitPaths.size() + svnPaths.size();
         System.out.println("========== 批量更新完成 ==========");
-        System.out.println("总计仓库数：" + repoPaths.size());
+        System.out.println("总计仓库数：" + total + "（Git=" + gitPaths.size() + "，SVN=" + svnPaths.size() + "）");
         System.out.println("成功更新：" + successCount);
-        System.out.println("失败/跳过：" + (repoPaths.size() - successCount));
+        System.out.println("失败/跳过：" + (total - successCount));
+    }
+
+    /**
+     * 查询基础路径下各仓库当前分支。
+     *
+     * @param vcsType git | svn | all
+     * @return 每项含 type、name、path、branch
+     */
+    public List<Map<String, String>> listCurrentBranches(String basePath, String vcsType) {
+        if (Strings.isBlank(basePath)) {
+            throw new IllegalArgumentException("基础路径不能为空");
+        }
+        String path = basePath;
+        if (!path.endsWith(File.separator)) {
+            path += File.separator;
+        }
+        File baseDir = new File(path);
+        if (!baseDir.exists() || !baseDir.isDirectory()) {
+            throw new IllegalArgumentException("基础路径不存在或不是目录：" + path);
+        }
+
+        String type = vcsType == null ? "git" : vcsType.trim().toLowerCase();
+        boolean includeGit = !"svn".equals(type);
+        boolean includeSvn = "svn".equals(type) || "all".equals(type)
+                || "git+svn".equals(type) || "both".equals(type);
+
+        List<String> gitPaths = new ArrayList<>();
+        List<String> svnPaths = new ArrayList<>();
+        if (includeGit) {
+            findGitRepositories(baseDir, gitPaths, 5, 0);
+        }
+        if (includeSvn) {
+            findSvnRepositories(baseDir, svnPaths, 5, 0);
+        }
+
+        List<Map<String, String>> rows = new ArrayList<>();
+        for (String repoPath : gitPaths) {
+            Map<String, String> row = new LinkedHashMap<>();
+            boolean submodule = GitUtil.isSubmoduleWorkingTree(repoPath);
+            row.put("type", "git");
+            row.put("kind", submodule ? "submodule" : "repo");
+            row.put("name", new File(repoPath).getName());
+            row.put("path", repoPath);
+            row.put("branch", GitUtil.currentBranch(repoPath));
+            rows.add(row);
+        }
+        for (String repoPath : svnPaths) {
+            Map<String, String> row = new LinkedHashMap<>();
+            row.put("type", "svn");
+            row.put("kind", "repo");
+            row.put("name", new File(repoPath).getName());
+            row.put("path", repoPath);
+            row.put("branch", SvnUtil.currentBranch(repoPath));
+            rows.add(row);
+        }
+        rows.sort(Comparator
+                .comparing((Map<String, String> m) -> m.get("type"))
+                .thenComparing(m -> "submodule".equals(m.get("kind")) ? 1 : 0)
+                .thenComparing(m -> m.get("name"), String.CASE_INSENSITIVE_ORDER));
+        return rows;
+    }
+
+    /**
+     * 切换单个仓库到指定分支/目标。
+     *
+     * @param repoPath 仓库根目录绝对路径
+     * @param ref      Git 分支/标签，或 SVN URL / {@code ^/branches/...}
+     * @param vcsType  git | svn；空则根据目录自动识别
+     * @return 是否成功
+     */
+    public boolean checkoutOneRepository(String repoPath, String ref, String vcsType) {
+        if (Strings.isBlank(repoPath)) {
+            throw new IllegalArgumentException("仓库路径不能为空");
+        }
+        if (Strings.isBlank(ref)) {
+            throw new IllegalArgumentException("分支/目标不能为空");
+        }
+        File dir = new File(repoPath.trim());
+        if (!dir.isDirectory()) {
+            throw new IllegalArgumentException("仓库路径不存在或不是目录：" + repoPath);
+        }
+        String type = vcsType == null ? "" : vcsType.trim().toLowerCase();
+        if (Strings.isBlank(type) || "auto".equals(type)) {
+            if (GitUtil.isValidGitRepository(dir.getAbsolutePath())) {
+                type = "git";
+            } else if (SvnUtil.isValidSvnWorkingCopy(dir.getAbsolutePath())) {
+                type = "svn";
+            } else {
+                throw new IllegalArgumentException("无法识别为 Git 或 SVN 仓库：" + repoPath);
+            }
+        }
+        String target = ref.trim();
+        if ("svn".equals(type)) {
+            return SvnUtil.svnSwitch(dir.getAbsolutePath(), target);
+        }
+        return GitUtil.gitCheckout(dir.getAbsolutePath(), target);
+    }
+
+    /**
+     * 将基础路径下的 Git 仓库切换到同一分支/标签。
+     */
+    public void checkoutAllGitRepositories(String basePath, String ref) {
+        checkoutVcsRepositories(basePath, ref, "Git", true, false);
+    }
+
+    /**
+     * 将基础路径下的 SVN 工作副本 switch 到同一目标（URL 或 {@code ^/branches/...}）。
+     */
+    public void switchAllSvnRepositories(String basePath, String target) {
+        checkoutVcsRepositories(basePath, target, "SVN", false, true);
+    }
+
+    /**
+     * Git checkout 与 SVN switch 使用同一目标字符串。
+     */
+    public void checkoutAllGitAndSvnRepositories(String basePath, String ref) {
+        checkoutVcsRepositories(basePath, ref, "Git+SVN", true, true);
+    }
+
+    private void checkoutVcsRepositories(String basePath, String ref, String title,
+                                         boolean checkoutGit, boolean switchSvn) {
+        if (Strings.isBlank(basePath)) {
+            System.out.println("基础路径不能为空！");
+            return;
+        }
+        if (Strings.isBlank(ref)) {
+            System.out.println("分支/目标不能为空！");
+            return;
+        }
+        if (!basePath.endsWith(File.separator)) {
+            basePath += File.separator;
+        }
+        File baseDir = new File(basePath);
+        if (!baseDir.exists() || !baseDir.isDirectory()) {
+            System.out.println("基础路径不存在或不是目录：" + basePath);
+            return;
+        }
+
+        System.out.println("========== 开始批量切换 " + title + " → " + ref + " ==========");
+        List<String> gitPaths = new ArrayList<>();
+        List<String> svnPaths = new ArrayList<>();
+        if (checkoutGit) {
+            findGitRepositories(baseDir, gitPaths, 5, 0);
+        }
+        if (switchSvn) {
+            findSvnRepositories(baseDir, svnPaths, 5, 0);
+        }
+        if (gitPaths.isEmpty() && svnPaths.isEmpty()) {
+            System.out.println("未找到任何" + title + "仓库！");
+            return;
+        }
+
+        ArrayBlockingQueue<Runnable> blockingQueue = new ArrayBlockingQueue<>(50);
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(5, 10, 30, TimeUnit.SECONDS, blockingQueue);
+        List<CompletableFuture<Boolean>> futures = new ArrayList<>();
+        String target = ref.trim();
+        for (String repoPath : gitPaths) {
+            futures.add(CompletableFuture.supplyAsync(() -> GitUtil.gitCheckout(repoPath, target), executor));
+        }
+        for (String repoPath : svnPaths) {
+            futures.add(CompletableFuture.supplyAsync(() -> SvnUtil.svnSwitch(repoPath, target), executor));
+        }
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        long successCount = futures.stream().filter(f -> {
+            try {
+                return Boolean.TRUE.equals(f.get());
+            } catch (Exception e) {
+                return false;
+            }
+        }).count();
+        executor.shutdown();
+        int total = gitPaths.size() + svnPaths.size();
+        System.out.println("========== 批量切换完成 ==========");
+        System.out.println("总计：" + total + "（Git=" + gitPaths.size() + "，SVN=" + svnPaths.size() + "）");
+        System.out.println("成功：" + successCount);
+        System.out.println("失败/跳过：" + (total - successCount));
+    }
+
+    /**
+     * 递归查找所有 SVN 工作副本根（含 .svn）
+     */
+    private void findSvnRepositories(File dir, List<String> repoPaths, int maxDepth, int currentDepth) {
+        if (dir == null || !dir.exists() || !dir.isDirectory() || currentDepth > maxDepth) {
+            return;
+        }
+
+        if (SvnUtil.isValidSvnWorkingCopy(dir.getAbsolutePath())) {
+            repoPaths.add(dir.getAbsolutePath());
+            System.out.println("找到SVN工作副本：" + dir.getAbsolutePath());
+            return;
+        }
+
+        File[] subDirs = dir.listFiles(File::isDirectory);
+        if (subDirs != null) {
+            for (File subDir : subDirs) {
+                String dirName = subDir.getName();
+                if (!dirName.equals("node_modules")
+                        && !dirName.equals("target")
+                        && !dirName.equals("build")
+                        && !dirName.equals(".idea")
+                        && !dirName.startsWith(".")) {
+                    findSvnRepositories(subDir, repoPaths, maxDepth, currentDepth + 1);
+                }
+            }
+        }
     }
 
     /**

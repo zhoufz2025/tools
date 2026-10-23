@@ -40,6 +40,20 @@ public class GitUpdateTest {
     }
 
     @Test
+    public void updateAllSvnRepositories() {
+        HundsunServiceImpl service = new HundsunServiceImpl();
+        String basePath = "/Users/zhoufz/hundsun/lcpt60/svn/";
+        service.updateAllSvnRepositories(basePath);
+    }
+
+    @Test
+    public void updateAllGitAndSvnRepositories() {
+        HundsunServiceImpl service = new HundsunServiceImpl();
+        String basePath = "/Users/zhoufz/hundsun/lcpt60/git/Sources/";
+        service.updateAllGitAndSvnRepositories(basePath);
+    }
+
+    @Test
     public void updateByRepositories() {
         HundsunServiceImpl service = new HundsunServiceImpl();
         String basePath = "/Users/zhoufz/hundsun/lcpt60/git/Sources/";

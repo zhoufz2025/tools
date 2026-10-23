@@ -440,17 +440,119 @@ public class GitUtil {
         return 20;
     }
 
-    /** {@code git rev-parse --abbrev-ref HEAD} 在分离 HEAD 时为字面量 {@code HEAD} */
-    private static boolean isOnNamedBranch(File dir) throws Exception {
-        ProcessBuilder pb = gitProcess(dir, false, "rev-parse", "--abbrev-ref", "HEAD");
+    /**
+     * 是否为 submodule 工作区（{@code .git} 为文件，指向父仓 modules）。
+     */
+    public static boolean isSubmoduleWorkingTree(String repoDir) {
+        File git = new File(repoDir, ".git");
+        return git.isFile();
+    }
+
+    /**
+     * 读取父仓 {@code .gitmodules} 中已初始化（存在且有效）的 submodule 绝对路径。
+     */
+    public static List<String> listInitializedSubmodulePaths(String parentRepoPath) {
+        List<String> result = new ArrayList<>();
+        File gitmodules = new File(parentRepoPath, ".gitmodules");
+        if (!gitmodules.isFile()) {
+            return result;
+        }
+        try {
+            String currentPath = null;
+            for (String line : java.nio.file.Files.readAllLines(gitmodules.toPath(), StandardCharsets.UTF_8)) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("[submodule")) {
+                    addSubmoduleIfInitialized(parentRepoPath, currentPath, result);
+                    currentPath = null;
+                } else if (trimmed.startsWith("path = ")) {
+                    currentPath = trimmed.substring("path = ".length()).trim();
+                }
+            }
+            addSubmoduleIfInitialized(parentRepoPath, currentPath, result);
+        } catch (Exception e) {
+            System.out.println("读取 .gitmodules 失败：" + parentRepoPath + " → " + e.getMessage());
+        }
+        return result;
+    }
+
+    private static void addSubmoduleIfInitialized(String parentRepoPath, String relativePath,
+                                                  List<String> result) {
+        if (relativePath == null || relativePath.trim().isEmpty()) {
+            return;
+        }
+        File sub = new File(parentRepoPath, relativePath.trim());
+        String abs = sub.getAbsolutePath();
+        if (result.contains(abs)) {
+            return;
+        }
+        if (isValidGitRepository(abs)) {
+            result.add(abs);
+        }
+    }
+
+    /**
+     * 查询仓库当前分支/检出位置。
+     * <p>命名分支返回分支名；分离 HEAD（含 submodule 钉死提交）用 {@code git describe --tags --always}
+     * 展示版本，例如 {@code tag/IFMS6.0V202607.04.000-12-ga2e3c2931}。</p>
+     *
+     * @return 分支描述；失败返回空串
+     */
+    public static String currentBranch(String repoDir) {
+        try {
+            File dir = new File(repoDir);
+            if (!dir.isDirectory() || !isValidGitRepository(repoDir)) {
+                return "";
+            }
+            String abbrev = readGitOneLine(dir, "rev-parse", "--abbrev-ref", "HEAD");
+            if (abbrev != null && !abbrev.isEmpty() && !"HEAD".equals(abbrev)) {
+                return abbrev;
+            }
+            String exact = readGitOneLine(dir, "describe", "--tags", "--exact-match");
+            if (exact != null && !exact.isEmpty()) {
+                return exact;
+            }
+            // submodule 常见：停在某 tag 之后若干提交，exact-match 失败，用 always 带出版本
+            String describe = readGitOneLine(dir, "describe", "--tags", "--always");
+            if (describe != null && !describe.isEmpty()) {
+                return describe;
+            }
+            String sha = readGitOneLine(dir, "rev-parse", "--short", "HEAD");
+            if (sha != null && !sha.isEmpty()) {
+                return "detached:" + sha;
+            }
+            return "HEAD";
+        } catch (Exception e) {
+            System.out.println("查询 Git 分支失败：" + repoDir + " → " + e.getMessage());
+            return "";
+        }
+    }
+
+    private static String readGitOneLine(File dir, String... gitArgs) throws Exception {
+        ProcessBuilder pb = gitProcess(dir, false, gitArgs);
         Process process = pb.start();
         String line;
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             line = reader.readLine();
         }
+        // 丢弃 stderr，避免阻塞
+        try (BufferedReader err = new BufferedReader(
+                new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+            while (err.readLine() != null) {
+                // ignore
+            }
+        }
         int code = process.waitFor();
-        return code == 0 && line != null && !"HEAD".equals(line.trim());
+        if (code != 0 || line == null) {
+            return "";
+        }
+        return line.trim();
+    }
+
+    /** {@code git rev-parse --abbrev-ref HEAD} 在分离 HEAD 时为字面量 {@code HEAD} */
+    private static boolean isOnNamedBranch(File dir) throws Exception {
+        String line = readGitOneLine(dir, "rev-parse", "--abbrev-ref", "HEAD");
+        return line != null && !line.isEmpty() && !"HEAD".equals(line);
     }
 
     private static int runGit(File dir, String... command) throws Exception {
