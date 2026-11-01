@@ -27,13 +27,17 @@ public class LocalDbInitController {
 
     private final ShardingViewService shardingViewService;
 
+    private final SpsqlDdlRefreshService spsqlDdlRefreshService;
+
     private final LocalDbInitProperties localDbInitProperties;
 
     public LocalDbInitController(LocalDbInitService localDbInitService,
                                  ShardingViewService shardingViewService,
+                                 SpsqlDdlRefreshService spsqlDdlRefreshService,
                                  LocalDbInitProperties localDbInitProperties) {
         this.localDbInitService = localDbInitService;
         this.shardingViewService = shardingViewService;
+        this.spsqlDdlRefreshService = spsqlDdlRefreshService;
         this.localDbInitProperties = localDbInitProperties;
     }
 
@@ -150,6 +154,94 @@ public class LocalDbInitController {
         }
         Result<ShardingViewResult> error = Result.error(
                 "分表视图生成失败: " + String.join("; ", result.getErrors()));
+        error.setData(result);
+        return error;
+    }
+
+    /**
+     * spsql 模块列表（可多选一起刷 / 单系统刷）
+     */
+    @GetMapping("/spsql/modules")
+    public Result<List<Map<String, String>>> listSpsqlModules() {
+        List<Map<String, String>> list = new ArrayList<>();
+        for (SpsqlModule module : SpsqlModule.values()) {
+            Map<String, String> item = new HashMap<>();
+            item.put("code", module.getCode());
+            item.put("label", module.getLabel());
+            item.put("dirName", module.getDirName());
+            item.put("pubDatabases", String.join(",", module.getPubDatabases()));
+            item.put("transDatabases", String.join(",", module.getTransDatabases()));
+            list.add(item);
+        }
+        return Result.success("spsql 模块", list);
+    }
+
+    /**
+     * 列出所选模块的发包版本（并集，新版本在前）
+     *
+     * @param modules 逗号分隔：pub,dxfund,dxasset,dxtrust,fina；空=全部
+     */
+    @GetMapping("/spsql/versions")
+    public Result<Map<String, Object>> listSpsqlVersions(
+            @RequestParam(value = "modules", required = false) String modules) {
+        try {
+            Set<SpsqlModule> moduleSet = SpsqlModule.parseCsv(modules);
+            Map<String, List<String>> perModule = spsqlDdlRefreshService.listVersions(moduleSet);
+            List<String> union = spsqlDdlRefreshService.listUnionVersions(moduleSet);
+            Map<String, Object> data = new HashMap<>();
+            data.put("spsqlRoot", spsqlDdlRefreshService.resolveSpsqlRoot().toString());
+            data.put("perModule", perModule);
+            data.put("versions", union);
+            return Result.success("共 " + union.size() + " 个版本", data);
+        } catch (Exception e) {
+            return Result.error("列出 spsql 版本失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 预览将执行的标准 mysql.DDL 文件
+     */
+    @GetMapping("/spsql/preview")
+    public Result<List<Map<String, String>>> previewSpsqlDdl(
+            @RequestParam("version") String version,
+            @RequestParam(value = "modules", required = false) String modules) {
+        try {
+            Set<SpsqlModule> moduleSet = SpsqlModule.parseCsv(modules);
+            List<Map<String, String>> rows = spsqlDdlRefreshService.preview(moduleSet, version);
+            return Result.success("将执行 " + rows.size() + " 个脚本任务", rows);
+        } catch (Exception e) {
+            return Result.error("预览失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 按发包版本刷新标准 mysql.DDL（排除 BANK/taclear）。
+     * 拆语句执行；已存在类错误忽略；可选账本跳过已成功语句。
+     *
+     * @param useLedger 默认 true
+     */
+    @RequestMapping(value = "/spsql/apply", method = {RequestMethod.GET, RequestMethod.POST})
+    public Result<SpsqlDdlRefreshResult> applySpsqlDdl(
+            @RequestParam("version") String version,
+            @RequestParam(value = "modules", required = false) String modules,
+            @RequestParam(value = "useLedger", required = false, defaultValue = "true") boolean useLedger) {
+        Set<SpsqlModule> moduleSet = SpsqlModule.parseCsv(modules);
+        SpsqlDdlRefreshResult result = spsqlDdlRefreshService.apply(moduleSet, version, useLedger);
+        if (result.isSuccess()) {
+            return Result.success("spsql DDL 刷新完成，版本=" + result.getPackageVersion()
+                    + "，成功语句=" + result.getSuccessStatements()
+                    + "，忽略已存在=" + result.getIgnoredCount()
+                    + "，账本跳过=" + result.getLedgerSkipCount()
+                    + "，耗时 " + result.getElapsedMs() + " ms", result);
+        }
+        // message 只给短摘要，明细在 data.errors，避免前端 ElMessage 整屏挡住
+        int errCount = result.getErrors() == null ? 0 : result.getErrors().size();
+        String first = errCount == 0 ? "未知错误" : result.getErrors().get(0);
+        if (first.length() > 160) {
+            first = first.substring(0, 160) + "...";
+        }
+        Result<SpsqlDdlRefreshResult> error = Result.error(
+                "spsql DDL 刷新失败（" + errCount + " 条），首条: " + first + "；详见下方错误列表");
         error.setData(result);
         return error;
     }

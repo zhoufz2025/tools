@@ -151,9 +151,12 @@ public class GitUtil {
     }
 
     /**
-     * 执行 git pull 更新指定目录的仓库
+     * 执行 git pull 更新指定目录的仓库。
+     * <p>首次 pull 失败时（常见于本地改动与远程冲突），自动执行
+     * {@code stash → pull → stash pop}；二次 pull 仍失败会尽量 stash pop 还原本地改动。</p>
+     *
      * @param repoDir 仓库目录路径
-     * @return 是否更新成功
+     * @return 是否更新成功（以 pull 是否成功为准；stash pop 冲突会打日志但仍可能返回 true）
      */
     public static boolean gitPull(String repoDir) {
         try {
@@ -162,8 +165,6 @@ public class GitUtil {
                 System.out.println("目录不存在：" + repoDir);
                 return false;
             }
-
-            // 检查是否是有效的git仓库
             if (!isValidGitRepository(repoDir)) {
                 System.out.println("不是有效的git仓库（无远程分支）：" + repoDir);
                 return false;
@@ -175,85 +176,152 @@ public class GitUtil {
             } else {
                 System.out.println("======开始更新：" + repoDir);
             }
-            
-            ProcessBuilder pb = hasSubmodules
-                    ? gitProcess(dir, false, "pull", "--recurse-submodules")
-                    : gitProcess(dir, false, "pull");
-            Process process = pb.start();
-            
-            // 打印执行过程中的输出
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    System.out.println(line);
-                }
-            }
-            
-            int exitCode = process.waitFor();
-            
-            // 如果有 submodule，还需要更新 submodule
-            if (exitCode == 0 && hasSubmodules) {
-                System.out.println("------检查并更新 submodules：" + repoDir);
-                
-                // 使用 foreach 遍历所有子模块并更新
-                ProcessBuilder pb2 = gitProcess(dir, false,
-                        "submodule", "foreach", resolveGitExecutable(), "pull", "origin", "HEAD");
-                Process process2 = pb2.start();
-                
-                int updatedCount = 0;
-                int unchangedCount = 0;
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(process2.getInputStream(), StandardCharsets.UTF_8))) {
-                    String line;
-                    String currentSubmodule = "";
-                    while ((line = reader.readLine()) != null) {
-                        // 识别进入哪个子模块
-                        if (line.startsWith("Entering '") || line.startsWith("正在进入 '")) {
-                            currentSubmodule = line;
-                        }
-                        // 只显示有实际更新的子模块
-                        else if (line.contains("Updating") || line.contains("Fast-forward") || 
-                                 line.contains("更新") || line.contains("快进")) {
-                            if (!currentSubmodule.isEmpty()) {
-                                System.out.println(currentSubmodule);
-                                currentSubmodule = "";
-                            }
-                            System.out.println("  " + line);
-                            updatedCount++;
-                        }
-                        else if (line.contains("Already up to date") || line.contains("已经是最新")) {
-                            unchangedCount++;
-                        }
-                    }
-                }
-                
-                int exitCode2 = process2.waitFor();
-                if (exitCode2 == 0) {
-                    if (updatedCount > 0) {
-                        System.out.println("更新了 " + updatedCount + " 个 submodule(s)");
-                    }
-                    if (unchangedCount > 0) {
-                        System.out.println(unchangedCount + " 个 submodule(s) 已是最新");
-                    }
-                    System.out.println("Git pull (含submodules) " + repoDir + " 成功！");
-                    return true;
-                } else {
-                    System.out.println("Submodule 更新失败，退出码：" + exitCode2);
-                    return false;
-                }
-            } else if (exitCode == 0) {
-                System.out.println("Git pull " + repoDir + " 成功！");
+
+            if (doGitPullOnce(dir, hasSubmodules)) {
                 return true;
-            } else {
-                System.out.println("Git pull " + repoDir + " 失败，退出码：" + exitCode);
+            }
+
+            System.out.println("Git pull 失败，尝试 stash → pull → stash pop：" + repoDir);
+            if (!stashPushForPull(dir)) {
+                System.out.println("stash 失败或无可暂存改动，放弃重试：" + repoDir);
                 return false;
             }
+
+            boolean pulled = doGitPullOnce(dir, hasSubmodules);
+            boolean popped = stashPopAfterPull(dir);
+            if (pulled) {
+                if (!popped) {
+                    System.out.println("[WARN] pull 已成功，但 stash pop 失败（可能有冲突），请手工处理：" + repoDir);
+                } else {
+                    System.out.println("Git pull（经 stash）" + repoDir + " 成功！");
+                }
+                return true;
+            }
+            System.out.println("stash 后再次 pull 仍失败：" + repoDir);
+            if (!popped) {
+                System.out.println("[WARN] stash pop 也失败，本地改动可能仍在 stash 中，请检查 git stash list：" + repoDir);
+            }
+            return false;
         } catch (Exception e) {
             System.out.println("Git pull " + repoDir + " 发生异常：");
             e.printStackTrace();
             return false;
         }
+    }
+
+    /**
+     * 执行一次 pull（含 submodule 后续更新），不自动 stash。
+     */
+    private static boolean doGitPullOnce(File dir, boolean hasSubmodules) throws Exception {
+        ProcessBuilder pb = hasSubmodules
+                ? gitProcess(dir, false, "pull", "--recurse-submodules")
+                : gitProcess(dir, false, "pull");
+        Process process = pb.start();
+        printProcessOutput(process);
+        int exitCode = process.waitFor();
+
+        if (exitCode == 0 && hasSubmodules) {
+            System.out.println("------检查并更新 submodules：" + dir.getAbsolutePath());
+            ProcessBuilder pb2 = gitProcess(dir, false,
+                    "submodule", "foreach", resolveGitExecutable(), "pull", "origin", "HEAD");
+            Process process2 = pb2.start();
+
+            int updatedCount = 0;
+            int unchangedCount = 0;
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process2.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                String currentSubmodule = "";
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("Entering '") || line.startsWith("正在进入 '")) {
+                        currentSubmodule = line;
+                    } else if (line.contains("Updating") || line.contains("Fast-forward")
+                            || line.contains("更新") || line.contains("快进")) {
+                        if (!currentSubmodule.isEmpty()) {
+                            System.out.println(currentSubmodule);
+                            currentSubmodule = "";
+                        }
+                        System.out.println("  " + line);
+                        updatedCount++;
+                    } else if (line.contains("Already up to date") || line.contains("已经是最新")) {
+                        unchangedCount++;
+                    }
+                }
+            }
+
+            int exitCode2 = process2.waitFor();
+            if (exitCode2 == 0) {
+                if (updatedCount > 0) {
+                    System.out.println("更新了 " + updatedCount + " 个 submodule(s)");
+                }
+                if (unchangedCount > 0) {
+                    System.out.println(unchangedCount + " 个 submodule(s) 已是最新");
+                }
+                System.out.println("Git pull (含submodules) " + dir.getAbsolutePath() + " 成功！");
+                return true;
+            }
+            System.out.println("Submodule 更新失败，退出码：" + exitCode2);
+            return false;
+        }
+        if (exitCode == 0) {
+            System.out.println("Git pull " + dir.getAbsolutePath() + " 成功！");
+            return true;
+        }
+        System.out.println("Git pull " + dir.getAbsolutePath() + " 失败，退出码：" + exitCode);
+        return false;
+    }
+
+    /**
+     * 暂存本地改动（含未跟踪文件），便于 pull。
+     *
+     * @return true 表示 stash 成功且有条目被创建
+     */
+    private static boolean stashPushForPull(File dir) throws Exception {
+        System.out.println("------ git stash push -u -m tools-auto-stash-before-pull：" + dir.getAbsolutePath());
+        int before = stashListSize(dir);
+        ProcessBuilder pb = gitProcess(dir, false,
+                "stash", "push", "-u", "-m", "tools-auto-stash-before-pull");
+        Process process = pb.start();
+        printProcessOutput(process);
+        int code = process.waitFor();
+        if (code != 0) {
+            System.out.println("stash push 失败，退出码：" + code);
+            return false;
+        }
+        int after = stashListSize(dir);
+        if (after <= before) {
+            // 常见：No local changes to save
+            System.out.println("stash 后条目数未增加，可能没有可暂存改动");
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean stashPopAfterPull(File dir) throws Exception {
+        System.out.println("------ git stash pop：" + dir.getAbsolutePath());
+        ProcessBuilder pb = gitProcess(dir, false, "stash", "pop");
+        Process process = pb.start();
+        printProcessOutput(process);
+        int code = process.waitFor();
+        if (code != 0) {
+            System.out.println("stash pop 失败，退出码：" + code);
+            return false;
+        }
+        return true;
+    }
+
+    private static int stashListSize(File dir) throws Exception {
+        ProcessBuilder pb = gitProcess(dir, false, "stash", "list");
+        Process process = pb.start();
+        int count = 0;
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            while (reader.readLine() != null) {
+                count++;
+            }
+        }
+        process.waitFor();
+        return count;
     }
 
     /**

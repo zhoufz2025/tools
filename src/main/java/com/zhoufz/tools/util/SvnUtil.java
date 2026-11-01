@@ -4,6 +4,9 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * 本机 SVN 工作副本工具（可执行文件解析 + update）。
@@ -64,6 +67,71 @@ public class SvnUtil {
             return url == null ? "" : url;
         } catch (Exception e) {
             System.out.println("查询 SVN 分支失败：" + repoDir + " → " + e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 列出远程目录子项（目录名去掉末尾 {@code /}）。失败返回空列表。
+     */
+    public static List<String> svnList(String url) {
+        if (url == null || url.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        String remote = trimSlash(url.trim());
+        try {
+            ProcessBuilder pb = svnProcess(new File("."), "list", remote);
+            Process process = pb.start();
+            List<String> names = new ArrayList<>();
+            StringBuilder err = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String name = line.trim();
+                    if (name.endsWith("/")) {
+                        name = name.substring(0, name.length() - 1);
+                    }
+                    if (!name.isEmpty()) {
+                        names.add(name);
+                    }
+                }
+            }
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    err.append(line).append('\n');
+                    System.out.println("[svn-err] " + line);
+                }
+            }
+            int code = process.waitFor();
+            if (code != 0) {
+                System.out.println("SVN list 失败：" + remote + "，退出码 " + code);
+                if (err.length() > 0) {
+                    System.out.println(err);
+                }
+                return Collections.emptyList();
+            }
+            return names;
+        } catch (Exception e) {
+            System.out.println("SVN list 异常：" + remote);
+            e.printStackTrace();
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 读取工作副本 {@code svn info --show-item}；失败返回空串。
+     */
+    public static String infoItem(String repoDir, String item) {
+        if (!isValidSvnWorkingCopy(repoDir) || item == null || item.trim().isEmpty()) {
+            return "";
+        }
+        try {
+            String value = readSvnInfoItem(new File(repoDir), item.trim());
+            return value == null ? "" : value;
+        } catch (Exception e) {
             return "";
         }
     }
@@ -135,6 +203,96 @@ public class SvnUtil {
             e.printStackTrace();
             return false;
         }
+    }
+
+    /**
+     * 检出 SVN 目录到本地。若目标已是工作副本且 URL 一致则改为 {@code svn update}；
+     * URL 不一致则失败；目标非空且非 WC 则失败。
+     *
+     * @param url       远程叶子 URL
+     * @param localPath 本地落点目录
+     * @return true 表示成功
+     */
+    public static boolean svnCheckout(String url, String localPath) {
+        if (url == null || url.trim().isEmpty()) {
+            System.out.println("SVN checkout URL 不能为空");
+            return false;
+        }
+        if (localPath == null || localPath.trim().isEmpty()) {
+            System.out.println("SVN checkout 本地路径不能为空");
+            return false;
+        }
+        String remote = url.trim();
+        File dir = new File(localPath.trim());
+        try {
+            if (isValidSvnWorkingCopy(dir.getAbsolutePath())) {
+                String currentUrl = readSvnInfoItem(dir, "url");
+                if (currentUrl != null && !currentUrl.isEmpty()
+                        && !urlsMatch(currentUrl, remote)) {
+                    System.out.println("本地已是其它 URL 的工作副本，拒绝覆盖："
+                            + dir.getAbsolutePath() + " → " + currentUrl + "，期望 " + remote);
+                    return false;
+                }
+                System.out.println("本地已是目标工作副本，改为 update：" + dir.getAbsolutePath());
+                return svnUpdate(dir.getAbsolutePath());
+            }
+            if (dir.exists()) {
+                String[] children = dir.list();
+                if (children != null && children.length > 0) {
+                    System.out.println("本地目录非空且不是 SVN 工作副本，拒绝 checkout：" + dir.getAbsolutePath());
+                    return false;
+                }
+            }
+            File parent = dir.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                System.out.println("无法创建父目录：" + parent.getAbsolutePath());
+                return false;
+            }
+            System.out.println("====== svn checkout " + remote + " → " + dir.getAbsolutePath());
+            // svn checkout 可在任意 cwd 下指定绝对目标路径
+            ProcessBuilder pb = svnProcess(parent != null ? parent : new File("."),
+                    "checkout", remote, dir.getAbsolutePath());
+            Process process = pb.start();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    System.out.println("[svn] " + line);
+                }
+            }
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    System.out.println("[svn-err] " + line);
+                }
+            }
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                System.out.println("SVN checkout 成功：" + dir.getAbsolutePath());
+                return true;
+            }
+            System.out.println("SVN checkout 失败，退出码：" + exitCode);
+            return false;
+        } catch (Exception e) {
+            System.out.println("SVN checkout 发生异常：" + localPath);
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private static boolean urlsMatch(String a, String b) {
+        String left = trimSlash(a);
+        String right = trimSlash(b);
+        return left.equalsIgnoreCase(right);
+    }
+
+    private static String trimSlash(String url) {
+        String s = url.trim();
+        while (s.endsWith("/")) {
+            s = s.substring(0, s.length() - 1);
+        }
+        return s;
     }
 
     /**

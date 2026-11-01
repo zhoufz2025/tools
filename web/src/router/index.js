@@ -14,10 +14,28 @@ const routes = [
         meta: { title: '本地库初始化' }
       },
       {
+        path: 'spsql',
+        name: 'spsql',
+        component: () => import('@/views/SpsqlDdl.vue'),
+        meta: { title: 'spsql DDL 刷新' }
+      },
+      {
         path: 'git',
         name: 'git',
         component: () => import('@/views/GitUpdate.vue'),
         meta: { title: 'Git/SVN 批量更新' }
+      },
+      {
+        path: 'svn-xiaobao',
+        name: 'svnXiaobao',
+        component: () => import('@/views/SvnXiaobao.vue'),
+        meta: { title: 'SVN 小包拉包' }
+      },
+      {
+        path: 'package-copy',
+        name: 'packageCopy',
+        component: () => import('@/views/PackageCopy.vue'),
+        meta: { title: '大包→小包复制' }
       },
       {
         path: 'config',

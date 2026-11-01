@@ -129,7 +129,7 @@
           </el-form-item>
         </el-form>
         <el-alert
-          title="递归扫描后并发更新：Git 执行 git pull，SVN 执行 svn update。进度看后端控制台。"
+          title="递归扫描后并发更新：Git 先 git pull；失败则自动 stash → pull → stash pop。SVN 执行 svn update。进度与 stash 冲突细节看后端控制台。"
           type="info"
           show-icon
           :closable="false"
@@ -169,7 +169,14 @@
         />
       </el-tab-pane>
 
-      <el-tab-pane label="代码替换" name="replace">
+      <el-tab-pane label="代码替换（废弃）" name="replace">
+        <el-alert
+          title="已废弃：请改用左侧菜单「大包→小包复制」（源根 A + 目标根 B + 文件列表，结构风险需强制确认）。本页配置文件方式仅保留兼容。"
+          type="warning"
+          show-icon
+          :closable="false"
+          style="margin-bottom: 12px"
+        />
         <el-form label-width="110px" style="max-width: 760px" @submit.prevent>
           <el-form-item label="替换类型">
             <el-radio-group v-model="replaceForm.vcsType">

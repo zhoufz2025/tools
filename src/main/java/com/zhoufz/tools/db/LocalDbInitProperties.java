@@ -13,6 +13,9 @@ public class LocalDbInitProperties {
     /** SQL 基线脚本根目录，指向 app/sql */
     private String sqlRoot = "/Users/zhoufz/hundsun/lcpt60/git/Sources/app/sql";
 
+    /** spsql 发包脚本根目录，指向 app/spsql */
+    private String spsqlRoot = "/Users/zhoufz/hundsun/lcpt60/git/Sources/app/spsql";
+
     /** mysql 客户端路径 */
     private String mysqlBin = "/opt/homebrew/opt/mysql@8.4/bin/mysql";
 
@@ -45,6 +48,14 @@ public class LocalDbInitProperties {
 
     public void setSqlRoot(String sqlRoot) {
         this.sqlRoot = sqlRoot;
+    }
+
+    public String getSpsqlRoot() {
+        return spsqlRoot;
+    }
+
+    public void setSpsqlRoot(String spsqlRoot) {
+        this.spsqlRoot = spsqlRoot;
     }
 
     public String getMysqlBin() {

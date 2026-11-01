@@ -25,18 +25,84 @@ public class SqlScriptSanitizer {
     }
 
     /**
-     * 读取 SQL 文件内容：优先 UTF-8，非法字节则回退 GBK（基线里部分 initdata 为 GBK）
+     * 读取 SQL 文件内容：优先 UTF-8，非法字节则回退 GBK（基线里部分 initdata 为 GBK）。
+     * 自动去掉 UTF-8 BOM（U+FEFF），否则去注释后会粘在首条 CREATE 上导致语法错误。
      */
     public static String readSqlContent(Path sqlFile) throws IOException {
         byte[] bytes = Files.readAllBytes(sqlFile);
+        int offset = 0;
+        if (bytes.length >= 3
+                && (bytes[0] & 0xFF) == 0xEF
+                && (bytes[1] & 0xFF) == 0xBB
+                && (bytes[2] & 0xFF) == 0xBF) {
+            offset = 3;
+        }
+        byte[] payload = offset == 0 ? bytes : java.util.Arrays.copyOfRange(bytes, offset, bytes.length);
         CharsetDecoder utf8 = StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT);
+        String text;
         try {
-            return utf8.decode(ByteBuffer.wrap(bytes)).toString();
+            text = utf8.decode(ByteBuffer.wrap(payload)).toString();
         } catch (CharacterCodingException e) {
-            return GBK.decode(ByteBuffer.wrap(bytes)).toString();
+            text = GBK.decode(ByteBuffer.wrap(payload)).toString();
         }
+        return stripBomChar(text);
+    }
+
+    /** 去掉残留的 BOM 字符（含语句中间偶发粘连） */
+    public static String stripBomChar(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        if (text.charAt(0) == '\uFEFF') {
+            text = text.substring(1);
+        }
+        return text.replace("\uFEFF", "");
+    }
+
+    /**
+     * spsql 的 *.mysql.proc.DDL.sql 通常无 DELIMITER，mysql 客户端无法直接执行。
+     * 按行把 CREATE PROCEDURE … END; 包成 DELIMITER // … END //。
+     */
+    public static String wrapProceduresWithDelimiter(String sql) {
+        if (sql == null || sql.isEmpty()) {
+            return sql;
+        }
+        String normalized = stripBomChar(sql);
+        if (containsDelimiterText(normalized)) {
+            return normalized;
+        }
+        StringBuilder out = new StringBuilder(normalized.length() + 64);
+        boolean inProcedure = false;
+        for (String line : normalized.split("\n", -1)) {
+            String trimmed = line.trim();
+            String upper = trimmed.toUpperCase(Locale.ROOT);
+            if (!inProcedure && (upper.startsWith("CREATE PROCEDURE")
+                    || upper.startsWith("CREATE DEFINER"))) {
+                out.append("DELIMITER //\n");
+                out.append(line).append('\n');
+                inProcedure = true;
+                continue;
+            }
+            if (inProcedure && (upper.equals("END;") || upper.equals("END ;"))) {
+                out.append("END //\n");
+                out.append("DELIMITER ;\n");
+                inProcedure = false;
+                continue;
+            }
+            out.append(line).append('\n');
+        }
+        return out.toString();
+    }
+
+    private static boolean containsDelimiterText(String sql) {
+        for (String line : sql.split("\n", -1)) {
+            if (line.trim().toUpperCase(Locale.ROOT).startsWith("DELIMITER ")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

@@ -1,6 +1,7 @@
-F:\AppSource
-F:\小包\202405.02
+/Users/zhoufz/hundsun/lcpt60/git
+/Users/zhoufz/hundsun/lcpt60/svn/branch/202405.05
 F:\小包\202405.05\056M1\IFMS6.0V202405.05.056M2
 F:\小包\202203.09\202203.09.053M1\lcpt-front\biz
 taskId:T202605144282
-\Sources\app\lcpt-server\sale\lcpt-dxfund\lcpt-dxfund-pub\lcpt-dxfund-pub-batch-bootstrap\src\main\java\com\hundsun\lcpt\dxfund\pub\batch\bank\shnsh\T219310\T219310HSAdapter.java
+/Sources/app/lcpt-server/sale/lcpt-dxasset/lcpt-dxasset-pub/lcpt-dxasset-pub-batch-bootstrap/src/main/java/com/hundsun/lcpt/dxasset/pub/batch/bank/jsyh/T2B9010/T2B9010HSAdapter.java
+/Sources/app/lcpt-server/sale/lcpt-dxtrust/lcpt-dxtrust-pub/lcpt-dxtrust-pub-batch-bootstrap/src/main/java/com/hundsun/lcpt/dxtrust/pub/batch/bank/jsyh/T279010/T279010HSAdapter.java

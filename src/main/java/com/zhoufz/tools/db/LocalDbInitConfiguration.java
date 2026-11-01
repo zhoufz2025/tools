@@ -25,6 +25,11 @@ public class LocalDbInitConfiguration {
     }
 
     @Bean
+    public SpsqlDdlRefreshService spsqlDdlRefreshService(LocalDbInitProperties properties) {
+        return new SpsqlDdlRefreshService(properties);
+    }
+
+    @Bean
     @ConditionalOnProperty(prefix = "local.db", name = "auto-init-on-start", havingValue = "true")
     public LocalDbInitRunner localDbInitRunner(LocalDbInitService localDbInitService) {
         return new LocalDbInitRunner(localDbInitService);

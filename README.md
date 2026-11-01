@@ -48,7 +48,10 @@ Vite 已将 `/hundsun` 代理到 `http://127.0.0.1:18080`，前端请求同源�
 ## 前端菜单
 
 - `/db` — 本地库初始化
-- `/git` — Git / SVN 批量更新、切换分支、大包到小包代码替换
+- `/spsql` — 按发包版本刷新标准 mysql.DDL（多系统一起 / 单系统；排除 BANK）
+- `/git` — Git / SVN 批量更新、切换分支；旧「代码替换」已废弃
+- `/svn-xiaobao` — SVN 小包拉包（按 branches/fix 叶子 checkout 业务代码 / spsql 版本 / 前端 / 低柜）
+- `/package-copy` — 大包→小包复制（源根 A + 目标根 B + 文件列表；结构风险需强制确认；SQL 可按 taskId 追加）
 - `/config` — 配置备份/还原
 
 ## 说明

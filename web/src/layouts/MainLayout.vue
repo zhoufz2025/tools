@@ -13,9 +13,21 @@
           <el-icon><Coin /></el-icon>
           <span>本地库初始化</span>
         </el-menu-item>
+        <el-menu-item index="/spsql">
+          <el-icon><Document /></el-icon>
+          <span>spsql DDL 刷新</span>
+        </el-menu-item>
         <el-menu-item index="/git">
           <el-icon><Refresh /></el-icon>
           <span>Git/SVN 批量更新</span>
+        </el-menu-item>
+        <el-menu-item index="/svn-xiaobao">
+          <el-icon><Download /></el-icon>
+          <span>SVN 小包拉包</span>
+        </el-menu-item>
+        <el-menu-item index="/package-copy">
+          <el-icon><CopyDocument /></el-icon>
+          <span>大包→小包复制</span>
         </el-menu-item>
         <el-menu-item index="/config">
           <el-icon><FolderOpened /></el-icon>
@@ -38,7 +50,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Coin, Refresh, FolderOpened } from '@element-plus/icons-vue'
+import { Coin, Document, Refresh, FolderOpened, Download, CopyDocument } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const active = computed(() => route.path)
