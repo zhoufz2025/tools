@@ -1,7 +1,7 @@
 <template>
   <el-card shadow="never">
     <template #header>Git / SVN 批量更新</template>
-    <el-tabs v-model="tab">
+    <el-tabs v-model="tab.name">
       <el-tab-pane label="查询分支" name="branches">
         <el-form label-width="100px" style="max-width: 760px" @submit.prevent>
           <el-form-item label="基础路径">
@@ -63,7 +63,7 @@
       <el-dialog
         v-model="checkoutDialog.visible"
         :title="`切换分支 — ${checkoutDialog.name || ''}`"
-        width="560px"
+        width="600px"
         append-to-body
         destroy-on-close
       >
@@ -91,16 +91,22 @@
               :placeholder="checkoutDialog.type === 'svn'
                 ? 'SVN URL 或 ^/branches/xxx'
                 : (checkoutDialog.kind === 'submodule'
-                  ? '业务前端版本，如 IFMS6.0V202607.04.000 或 tag/IFMS6.0V202607.04.000'
+                  ? '业务前端版本：tag/IFMS6.0V… 或 IFMS6.0V…'
                   : '例如 IFMS6.0V202607.00.005 或 hotfix/IFMS6.0V202607.00.005')"
               clearable
               @keyup.enter="confirmCheckoutOne"
             />
           </el-form-item>
+          <el-form-item v-if="checkoutDialog.type === 'git'" label="选项">
+            <el-checkbox v-model="checkoutOpts.fetchTags">拉取 tags</el-checkbox>
+            <el-checkbox v-model="checkoutOpts.pullAfter">切换后再 pull</el-checkbox>
+            <el-checkbox v-model="checkoutOpts.updateSubmodules">更新 submodule</el-checkbox>
+            <el-checkbox v-model="checkoutOpts.skipIfSame">已在目标则跳过</el-checkbox>
+          </el-form-item>
         </el-form>
         <el-alert
           v-if="checkoutDialog.kind === 'submodule'"
-          title="仅切换该业务前端 submodule（如 console-dxfund-vue），不会改 HUI1.0 父仓分支。"
+          title="仅切换该业务前端 submodule。切发布 tag 请填 tag/版本号（会按需拉单个 tag，默认不拉全量 tags）。"
           type="warning"
           show-icon
           :closable="false"
@@ -113,9 +119,12 @@
       </el-dialog>
 
       <el-tab-pane label="批量更新" name="update">
-        <el-form label-width="100px" style="max-width: 760px" @submit.prevent>
+        <el-form label-width="100px" style="max-width: 860px" @submit.prevent>
           <el-form-item label="基础路径">
-            <PathFolderInput v-model="updateForm.basePath" placeholder="例如 /Users/zhoufz/hundsun/lcpt60/git/Sources/" />
+            <PathFolderInput
+              v-model="updateForm.basePath"
+              placeholder="例如 …/lcpt-front/HUI1.0 或 …/git/Sources/"
+            />
           </el-form-item>
           <el-form-item label="仓库类型">
             <el-radio-group v-model="updateForm.vcsType">
@@ -124,12 +133,17 @@
               <el-radio-button value="all">Git + SVN</el-radio-button>
             </el-radio-group>
           </el-form-item>
+          <el-form-item v-if="updateForm.vcsType !== 'svn'" label="选项">
+            <el-checkbox v-model="updateForm.updateSubmodules">
+              同时更新 submodule（HUI1.0 等前端父仓默认不要勾，会慢很多）
+            </el-checkbox>
+          </el-form-item>
           <el-form-item>
             <el-button type="primary" :loading="busy" @click="updateAll">批量更新</el-button>
           </el-form-item>
         </el-form>
         <el-alert
-          title="递归扫描后并发更新：Git 先 git pull；失败则自动 stash → pull → stash pop。SVN 执行 svn update。进度与 stash 冲突细节看后端控制台。"
+          title="默认只 pull 扫描到的父仓，不展开/更新 submodule。勾选后才会把 console-*-vue 等一并 pull。失败则 stash → pull → stash pop（冲突以本地 stash 为准）。"
           type="info"
           show-icon
           :closable="false"
@@ -137,7 +151,7 @@
       </el-tab-pane>
 
       <el-tab-pane label="切换分支" name="checkout">
-        <el-form label-width="100px" style="max-width: 760px" @submit.prevent>
+        <el-form label-width="100px" style="max-width: 860px" @submit.prevent>
           <el-form-item label="基础路径">
             <PathFolderInput v-model="checkoutForm.basePath" placeholder="扫描该目录下的仓库" />
           </el-form-item>
@@ -157,16 +171,45 @@
               clearable
             />
           </el-form-item>
+          <el-form-item v-if="checkoutForm.vcsType !== 'svn'" label="选项">
+            <el-checkbox v-model="checkoutOpts.fetchTags">拉取 tags</el-checkbox>
+            <el-checkbox v-model="checkoutOpts.pullAfter">切换后再 pull</el-checkbox>
+            <el-checkbox v-model="checkoutOpts.updateSubmodules">更新 submodule</el-checkbox>
+            <el-checkbox v-model="checkoutOpts.skipIfSame">已在目标则跳过</el-checkbox>
+          </el-form-item>
           <el-form-item>
             <el-button type="warning" :loading="busy" @click="checkoutAll">切换</el-button>
           </el-form-item>
         </el-form>
         <el-alert
-          title="Git：fetch 后 checkout（可匹配 hotfix/版本、release/版本），命名分支上会再 pull。SVN：svn switch，目标须是 URL 或 ^/ 相对路径。"
+          title="默认轻量：先本地 checkout → 单分支 fetch（不拉全量 tags）→ 不 pull、不 recursive submodule。切 tag 请填 tag/版本 或勾选「拉取 tags」。"
           type="warning"
           show-icon
           :closable="false"
         />
+        <el-table
+          v-if="checkoutResultRows.length"
+          :data="checkoutResultRows"
+          stripe
+          border
+          size="small"
+          max-height="420"
+          style="margin-top: 12px"
+        >
+          <el-table-column prop="name" label="仓库" width="160" show-overflow-tooltip />
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.status === 'ok' || row.status === 'skipped' ? 'success' : 'danger'">
+                {{ row.status === 'skipped' ? '跳过' : (row.status === 'ok' ? '成功' : '失败') }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="branch" label="当前分支" min-width="160" show-overflow-tooltip />
+          <el-table-column label="耗时" width="100">
+            <template #default="{ row }">{{ formatMs(row.timings?.totalMs) }}</template>
+          </el-table-column>
+          <el-table-column prop="message" label="说明" min-width="180" show-overflow-tooltip />
+        </el-table>
       </el-tab-pane>
 
       <el-tab-pane label="代码替换（废弃）" name="replace">
@@ -230,8 +273,9 @@ import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import http from '@/api/http'
 import PathFolderInput from '@/components/PathFolderInput.vue'
+import { usePersistedState } from '@/composables/usePersistedState'
 
-const tab = ref('branches')
+const tab = usePersistedState('gitUpdate.tab', { name: 'branches' })
 const busy = ref(false)
 const resultMsg = ref('')
 const resultOk = ref(true)
@@ -246,21 +290,29 @@ const checkoutDialog = reactive({
   currentBranch: '',
   ref: ''
 })
+const checkoutOpts = usePersistedState('gitUpdate.checkoutOpts', {
+  fetchTags: false,
+  pullAfter: false,
+  updateSubmodules: false,
+  skipIfSame: true
+})
+const checkoutResultRows = ref([])
 
-const branchForm = reactive({
-  basePath: '/Users/zhoufz/hundsun/lcpt60/git/Sources/',
+const branchForm = usePersistedState('gitUpdate.branchForm', {
+  basePath: '/Users/zhoufz/hundsun/lcpt60/git/Sources/lcpt-front/HUI1.0',
   vcsType: 'git'
 })
-const updateForm = reactive({
-  basePath: '/Users/zhoufz/hundsun/lcpt60/git/Sources/',
-  vcsType: 'git'
+const updateForm = usePersistedState('gitUpdate.updateForm', {
+  basePath: '/Users/zhoufz/hundsun/lcpt60/git/Sources/lcpt-front/HUI1.0',
+  vcsType: 'git',
+  updateSubmodules: false
 })
-const checkoutForm = reactive({
+const checkoutForm = usePersistedState('gitUpdate.checkoutForm', {
   basePath: '/Users/zhoufz/hundsun/lcpt60/git/Sources/',
   vcsType: 'git',
   ref: ''
 })
-const replaceForm = reactive({
+const replaceForm = usePersistedState('gitUpdate.replaceForm', {
   vcsType: 'git',
   filePath: ''
 })
@@ -303,6 +355,23 @@ function openCheckoutDialog(row) {
   checkoutDialog.visible = true
 }
 
+function formatMs(ms) {
+  if (ms == null || ms < 0) return '-'
+  if (ms < 1000) return ms + ' ms'
+  const sec = Math.round(ms / 1000)
+  if (sec < 60) return sec + ' s'
+  return Math.floor(sec / 60) + ' min ' + (sec % 60) + ' s'
+}
+
+function checkoutOptionParams() {
+  return {
+    fetchTags: !!checkoutOpts.fetchTags,
+    pullAfter: !!checkoutOpts.pullAfter,
+    updateSubmodules: !!checkoutOpts.updateSubmodules,
+    skipIfSame: !!checkoutOpts.skipIfSame
+  }
+}
+
 async function confirmCheckoutOne() {
   if (!checkoutDialog.path || !checkoutDialog.ref?.trim()) {
     ElMessage.warning(checkoutDialog.type === 'svn' ? '请填写切换目标' : '请填写目标分支')
@@ -320,8 +389,10 @@ async function confirmCheckoutOne() {
       params: {
         repoPath: checkoutDialog.path,
         ref: target,
-        vcsType: checkoutDialog.type || 'auto'
-      }
+        vcsType: checkoutDialog.type || 'auto',
+        ...checkoutOptionParams()
+      },
+      timeout: 10 * 60 * 1000
     })
     resultOk.value = true
     resultMsg.value = res.message || '切换成功'
@@ -336,6 +407,9 @@ async function confirmCheckoutOne() {
   } catch (e) {
     resultOk.value = false
     resultMsg.value = e.message || '切换失败'
+    if (e.data) {
+      checkoutResultRows.value = [e.data]
+    }
   } finally {
     busy.value = false
   }
@@ -369,11 +443,22 @@ async function updateAll() {
     ElMessage.warning('请填写基础路径')
     return
   }
+  const withSub = !!updateForm.updateSubmodules
+  const tip = withSub
+    ? '将展开并更新 submodule（HUI 下各业务前端会一起 pull），可能较慢。确认继续？'
+    : '仅更新父仓（不更新 submodule）。确认继续？'
+  const ok = await confirmDanger(tip)
+  if (!ok) return
   busy.value = true
   resultMsg.value = ''
   try {
     const res = await http.get('/hundsun/git/updateAll', {
-      params: { basePath: updateForm.basePath.trim(), vcsType: updateForm.vcsType }
+      params: {
+        basePath: updateForm.basePath.trim(),
+        vcsType: updateForm.vcsType,
+        updateSubmodules: withSub
+      },
+      timeout: 30 * 60 * 1000
     })
     resultOk.value = true
     resultMsg.value = res.message || '完成'
@@ -391,24 +476,29 @@ async function checkoutAll() {
     return
   }
   const ok = await confirmDanger(
-    `将把「${checkoutForm.basePath.trim()}」下的 ${checkoutForm.vcsType} 仓库切换到「${checkoutForm.ref.trim()}」。未提交改动可能导致 checkout/switch 失败。确认继续？`
+    `将把「${checkoutForm.basePath.trim()}」下的 ${checkoutForm.vcsType} 仓库切换到「${checkoutForm.ref.trim()}」（默认不拉全量 tags、不 pull）。确认继续？`
   )
   if (!ok) return
   busy.value = true
   resultMsg.value = ''
+  checkoutResultRows.value = []
   try {
     const res = await http.get('/hundsun/git/checkoutAll', {
       params: {
         basePath: checkoutForm.basePath.trim(),
         ref: checkoutForm.ref.trim(),
-        vcsType: checkoutForm.vcsType
-      }
+        vcsType: checkoutForm.vcsType,
+        ...checkoutOptionParams()
+      },
+      timeout: 30 * 60 * 1000
     })
     resultOk.value = true
     resultMsg.value = res.message || '完成'
+    checkoutResultRows.value = res.data?.items || []
   } catch (e) {
     resultOk.value = false
     resultMsg.value = e.message || '失败'
+    checkoutResultRows.value = e.data?.items || []
   } finally {
     busy.value = false
   }

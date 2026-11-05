@@ -42,17 +42,19 @@ public class HundsunController {
     @RequestMapping("/hundsun/git/updateAll")
     public Result<String> updateAllRepositories(
             @RequestParam("basePath") String basePath,
-            @RequestParam(value = "vcsType", required = false, defaultValue = "git") String vcsType) {
+            @RequestParam(value = "vcsType", required = false, defaultValue = "git") String vcsType,
+            @RequestParam(value = "updateSubmodules", required = false, defaultValue = "false") boolean updateSubmodules) {
         try {
             String type = vcsType == null ? "git" : vcsType.trim().toLowerCase();
             if ("svn".equals(type)) {
                 hundsunService.updateAllSvnRepositories(basePath);
             } else if ("all".equals(type) || "git+svn".equals(type) || "both".equals(type)) {
-                hundsunService.updateAllGitAndSvnRepositories(basePath);
+                hundsunService.updateAllGitAndSvnRepositories(basePath, updateSubmodules);
             } else {
-                hundsunService.updateAllGitRepositories(basePath);
+                hundsunService.updateAllGitRepositories(basePath, updateSubmodules);
             }
-            return Result.success("批量更新完成（" + type + "），请查看控制台日志获取详细信息");
+            String tip = updateSubmodules ? "（含 submodule）" : "（未更新 submodule）";
+            return Result.success("批量更新完成（" + type + tip + "），请查看控制台日志获取详细信息");
         } catch (Exception e) {
             e.printStackTrace();
             return Result.error("批量更新失败：" + e.getMessage());
@@ -83,26 +85,40 @@ public class HundsunController {
      * @param repoPath 仓库根目录
      * @param ref      分支/标签；SVN 为 URL 或 {@code ^/branches/xxx}
      * @param vcsType  git | svn | auto，默认 auto
+     * @param fetchTags 是否拉 tags（默认 false；目标写 tag/xxx 时会自动按 tag 拉）
+     * @param pullAfter 切换后再 pull（默认 false）
+     * @param updateSubmodules 是否 recursive 更新 submodule（默认 false）
      */
     @RequestMapping("/hundsun/git/checkoutOne")
-    public Result<Map<String, String>> checkoutOneRepository(
+    public Result<Map<String, Object>> checkoutOneRepository(
             @RequestParam("repoPath") String repoPath,
             @RequestParam("ref") String ref,
-            @RequestParam(value = "vcsType", required = false, defaultValue = "auto") String vcsType) {
+            @RequestParam(value = "vcsType", required = false, defaultValue = "auto") String vcsType,
+            @RequestParam(value = "fetchTags", required = false, defaultValue = "false") boolean fetchTags,
+            @RequestParam(value = "pullAfter", required = false, defaultValue = "false") boolean pullAfter,
+            @RequestParam(value = "updateSubmodules", required = false, defaultValue = "false") boolean updateSubmodules,
+            @RequestParam(value = "skipIfSame", required = false, defaultValue = "true") boolean skipIfSame) {
         try {
-            boolean ok = hundsunService.checkoutOneRepository(repoPath, ref, vcsType);
-            String resolvedType = resolveRepoType(repoPath, vcsType);
-            Map<String, String> data = new HashMap<>();
-            data.put("repoPath", repoPath);
-            data.put("ref", ref);
-            data.put("vcsType", resolvedType);
-            data.put("branch", "svn".equals(resolvedType)
-                    ? SvnUtil.currentBranch(repoPath)
-                    : GitUtil.currentBranch(repoPath));
+            GitUtil.CheckoutOptions options = new GitUtil.CheckoutOptions();
+            options.fetchTags = fetchTags;
+            options.pullAfter = pullAfter;
+            options.updateSubmodules = updateSubmodules;
+            options.skipIfAlreadyOnRef = skipIfSame;
+            Map<String, Object> data = hundsunService.checkoutOneRepositoryDetailed(
+                    repoPath, ref, vcsType, options);
+            boolean ok = Boolean.TRUE.equals(data.get("success"));
+            Object branch = data.get("branch");
+            Object totalMs = data.get("timings") instanceof Map
+                    ? ((Map<?, ?>) data.get("timings")).get("totalMs") : null;
+            String timing = totalMs == null ? "" : "，耗时 " + totalMs + " ms";
             if (ok) {
-                return Result.success("切换成功：" + data.get("branch"), data);
+                String msg = Boolean.TRUE.equals(data.get("skipped"))
+                        ? "已在目标，已跳过：" + branch + timing
+                        : "切换成功：" + branch + timing;
+                return Result.success(msg, data);
             }
-            Result<Map<String, String>> error = Result.error("切换失败，请查看控制台日志");
+            Result<Map<String, Object>> error = Result.error(
+                    String.valueOf(data.getOrDefault("message", "切换失败")) + timing);
             error.setData(data);
             return error;
         } catch (Exception e) {
@@ -128,25 +144,47 @@ public class HundsunController {
     }
 
     /**
-     * 批量切换分支。Git 走 {@code git checkout}，SVN 走 {@code svn switch}。
+     * 批量切换分支。Git 走轻量 checkout，SVN 走 {@code svn switch}。
      *
      * @param ref 分支/标签；SVN 请填 URL 或 {@code ^/branches/xxx}
      */
     @RequestMapping("/hundsun/git/checkoutAll")
-    public Result<String> checkoutAllRepositories(
+    public Result<Map<String, Object>> checkoutAllRepositories(
             @RequestParam("basePath") String basePath,
             @RequestParam("ref") String ref,
-            @RequestParam(value = "vcsType", required = false, defaultValue = "git") String vcsType) {
+            @RequestParam(value = "vcsType", required = false, defaultValue = "git") String vcsType,
+            @RequestParam(value = "fetchTags", required = false, defaultValue = "false") boolean fetchTags,
+            @RequestParam(value = "pullAfter", required = false, defaultValue = "false") boolean pullAfter,
+            @RequestParam(value = "updateSubmodules", required = false, defaultValue = "false") boolean updateSubmodules,
+            @RequestParam(value = "skipIfSame", required = false, defaultValue = "true") boolean skipIfSame) {
         try {
+            GitUtil.CheckoutOptions options = new GitUtil.CheckoutOptions();
+            options.fetchTags = fetchTags;
+            options.pullAfter = pullAfter;
+            options.updateSubmodules = updateSubmodules;
+            options.skipIfAlreadyOnRef = skipIfSame;
+
             String type = vcsType == null ? "git" : vcsType.trim().toLowerCase();
+            Map<String, Object> data;
             if ("svn".equals(type)) {
-                hundsunService.switchAllSvnRepositories(basePath, ref);
+                data = hundsunService.checkoutVcsRepositoriesDetailed(
+                        basePath, ref, "SVN", false, true, options);
             } else if ("all".equals(type) || "git+svn".equals(type) || "both".equals(type)) {
-                hundsunService.checkoutAllGitAndSvnRepositories(basePath, ref);
+                data = hundsunService.checkoutVcsRepositoriesDetailed(
+                        basePath, ref, "Git+SVN", true, true, options);
             } else {
-                hundsunService.checkoutAllGitRepositories(basePath, ref);
+                data = hundsunService.checkoutVcsRepositoriesDetailed(
+                        basePath, ref, "Git", true, false, options);
             }
-            return Result.success("批量切换完成（" + type + " → " + ref + "），请查看控制台日志");
+            int failed = data.get("failed") instanceof Number ? ((Number) data.get("failed")).intValue() : 0;
+            String msg = String.valueOf(data.getOrDefault("message",
+                    "批量切换完成（" + type + " → " + ref + "）"));
+            if (failed > 0) {
+                Result<Map<String, Object>> error = Result.error(msg);
+                error.setData(data);
+                return error;
+            }
+            return Result.success(msg, data);
         } catch (Exception e) {
             e.printStackTrace();
             return Result.error("批量切换失败：" + e.getMessage());

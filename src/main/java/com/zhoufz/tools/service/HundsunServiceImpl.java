@@ -552,6 +552,14 @@ public class HundsunServiceImpl {
      * @param currentDepth 当前递归深度
      */
     private void findGitRepositories(File dir, List<String> repoPaths, int maxDepth, int currentDepth) {
+        findGitRepositories(dir, repoPaths, maxDepth, currentDepth, true);
+    }
+
+    /**
+     * @param includeSubmodules false 时只收录父仓，不展开 .gitmodules（适合 HUI 仅更新父仓）
+     */
+    private void findGitRepositories(File dir, List<String> repoPaths, int maxDepth, int currentDepth,
+                                     boolean includeSubmodules) {
         if (dir == null || !dir.exists() || !dir.isDirectory() || currentDepth > maxDepth) {
             return;
         }
@@ -565,8 +573,12 @@ public class HundsunServiceImpl {
                     repoPaths.add(abs);
                     System.out.println("找到Git仓库：" + abs);
                 }
-                // HUI 等父仓：继续收集已初始化的 submodule（如 console/src/biz/console-dxfund-vue）
-                collectInitializedSubmodules(dir, repoPaths);
+                if (includeSubmodules) {
+                    // HUI 等父仓：继续收集已初始化的 submodule（如 console/src/biz/console-dxfund-vue）
+                    collectInitializedSubmodules(dir, repoPaths);
+                } else if (GitUtil.hasSubmodules(abs)) {
+                    System.out.println("跳过展开 submodule（未勾选更新 submodule）：" + abs);
+                }
                 // 不再随意递归普通子目录，避免把父仓工作区目录当成独立仓
                 return;
             }
@@ -579,12 +591,12 @@ public class HundsunServiceImpl {
             for (File subDir : subDirs) {
                 // 跳过常见的非仓库目录
                 String dirName = subDir.getName();
-                if (!dirName.equals("node_modules") && 
-                    !dirName.equals("target") && 
+                if (!dirName.equals("node_modules") &&
+                    !dirName.equals("target") &&
                     !dirName.equals("build") &&
                     !dirName.equals(".idea") &&
                     !dirName.startsWith(".")) {
-                    findGitRepositories(subDir, repoPaths, maxDepth, currentDepth + 1);
+                    findGitRepositories(subDir, repoPaths, maxDepth, currentDepth + 1, includeSubmodules);
                 }
             }
         }
@@ -610,7 +622,11 @@ public class HundsunServiceImpl {
      * @param basePath 基础路径，例如：/Users/zhoufz/hundsun/lcpt60/git/Sources/
      */
     public void updateAllGitRepositories(String basePath) {
-        updateVcsRepositories(basePath, "Git", true, false);
+        updateAllGitRepositories(basePath, false);
+    }
+
+    public void updateAllGitRepositories(String basePath, boolean updateSubmodules) {
+        updateVcsRepositories(basePath, "Git", true, false, updateSubmodules);
     }
 
     /**
@@ -619,17 +635,22 @@ public class HundsunServiceImpl {
      * @param basePath 基础路径，例如：/Users/zhoufz/hundsun/lcpt60/svn/
      */
     public void updateAllSvnRepositories(String basePath) {
-        updateVcsRepositories(basePath, "SVN", false, true);
+        updateVcsRepositories(basePath, "SVN", false, true, false);
     }
 
     /**
      * 在同一基础路径下先更新 Git，再更新 SVN。
      */
     public void updateAllGitAndSvnRepositories(String basePath) {
-        updateVcsRepositories(basePath, "Git+SVN", true, true);
+        updateAllGitAndSvnRepositories(basePath, false);
     }
 
-    private void updateVcsRepositories(String basePath, String title, boolean updateGit, boolean updateSvn) {
+    public void updateAllGitAndSvnRepositories(String basePath, boolean updateSubmodules) {
+        updateVcsRepositories(basePath, "Git+SVN", true, true, updateSubmodules);
+    }
+
+    private void updateVcsRepositories(String basePath, String title, boolean updateGit, boolean updateSvn,
+                                       boolean updateSubmodules) {
         if (Strings.isBlank(basePath)) {
             System.out.println("基础路径不能为空！");
             return;
@@ -646,12 +667,13 @@ public class HundsunServiceImpl {
 
         System.out.println("========== 开始批量更新所有" + title + "仓库 ==========");
         System.out.println("基础路径：" + basePath);
+        System.out.println("更新 submodule：" + updateSubmodules);
         System.out.println("扫描中...");
 
         List<String> gitPaths = new ArrayList<>();
         List<String> svnPaths = new ArrayList<>();
         if (updateGit) {
-            findGitRepositories(baseDir, gitPaths, 5, 0);
+            findGitRepositories(baseDir, gitPaths, 5, 0, updateSubmodules);
         }
         if (updateSvn) {
             findSvnRepositories(baseDir, svnPaths, 5, 0);
@@ -665,7 +687,7 @@ public class HundsunServiceImpl {
         System.out.println("共找到 Git=" + gitPaths.size() + "，SVN=" + svnPaths.size());
         System.out.println("开始更新...");
 
-        ArrayBlockingQueue<Runnable> blockingQueue = new ArrayBlockingQueue<>(50);
+        ArrayBlockingQueue<Runnable> blockingQueue = new ArrayBlockingQueue<>(200);
         int corePoolSize = 5, maxPoolSize = 10, keepAliveTime = 30;
         ThreadPoolExecutor executor = new ThreadPoolExecutor(
                 corePoolSize,
@@ -676,7 +698,8 @@ public class HundsunServiceImpl {
 
         List<CompletableFuture<Boolean>> futures = new ArrayList<>();
         for (String repoPath : gitPaths) {
-            futures.add(CompletableFuture.supplyAsync(() -> GitUtil.gitPull(repoPath), executor));
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> GitUtil.gitPull(repoPath, updateSubmodules), executor));
         }
         for (String repoPath : svnPaths) {
             futures.add(CompletableFuture.supplyAsync(() -> SvnUtil.svnUpdate(repoPath), executor));
@@ -770,6 +793,16 @@ public class HundsunServiceImpl {
      * @return 是否成功
      */
     public boolean checkoutOneRepository(String repoPath, String ref, String vcsType) {
+        Map<String, Object> data = checkoutOneRepositoryDetailed(repoPath, ref, vcsType,
+                GitUtil.CheckoutOptions.defaults());
+        return Boolean.TRUE.equals(data.get("success"));
+    }
+
+    /**
+     * 切换单个仓库，返回分步耗时与状态（Git 走轻量选项）。
+     */
+    public Map<String, Object> checkoutOneRepositoryDetailed(String repoPath, String ref, String vcsType,
+                                                             GitUtil.CheckoutOptions options) {
         if (Strings.isBlank(repoPath)) {
             throw new IllegalArgumentException("仓库路径不能为空");
         }
@@ -792,52 +825,81 @@ public class HundsunServiceImpl {
         }
         String target = ref.trim();
         if ("svn".equals(type)) {
-            return SvnUtil.svnSwitch(dir.getAbsolutePath(), target);
+            long t0 = System.currentTimeMillis();
+            boolean ok = SvnUtil.svnSwitch(dir.getAbsolutePath(), target);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("success", ok);
+            data.put("skipped", false);
+            data.put("status", ok ? "ok" : "failed");
+            data.put("vcsType", "svn");
+            data.put("repoPath", dir.getAbsolutePath());
+            data.put("ref", target);
+            data.put("branch", SvnUtil.currentBranch(dir.getAbsolutePath()));
+            data.put("message", ok ? "svn switch 成功" : "svn switch 失败");
+            Map<String, Object> timings = new LinkedHashMap<>();
+            timings.put("totalMs", System.currentTimeMillis() - t0);
+            data.put("timings", timings);
+            return data;
         }
-        return GitUtil.gitCheckout(dir.getAbsolutePath(), target);
+        Map<String, Object> data = GitUtil.gitCheckoutWithResult(dir.getAbsolutePath(), target, options);
+        data.put("vcsType", "git");
+        return data;
     }
 
     /**
      * 将基础路径下的 Git 仓库切换到同一分支/标签。
      */
     public void checkoutAllGitRepositories(String basePath, String ref) {
-        checkoutVcsRepositories(basePath, ref, "Git", true, false);
+        checkoutVcsRepositories(basePath, ref, "Git", true, false, GitUtil.CheckoutOptions.defaults());
     }
 
     /**
      * 将基础路径下的 SVN 工作副本 switch 到同一目标（URL 或 {@code ^/branches/...}）。
      */
     public void switchAllSvnRepositories(String basePath, String target) {
-        checkoutVcsRepositories(basePath, target, "SVN", false, true);
+        checkoutVcsRepositories(basePath, target, "SVN", false, true, GitUtil.CheckoutOptions.defaults());
     }
 
     /**
      * Git checkout 与 SVN switch 使用同一目标字符串。
      */
     public void checkoutAllGitAndSvnRepositories(String basePath, String ref) {
-        checkoutVcsRepositories(basePath, ref, "Git+SVN", true, true);
+        checkoutVcsRepositories(basePath, ref, "Git+SVN", true, true, GitUtil.CheckoutOptions.defaults());
     }
 
-    private void checkoutVcsRepositories(String basePath, String ref, String title,
-                                         boolean checkoutGit, boolean switchSvn) {
+    /**
+     * 批量切换并返回分仓结果与总耗时。
+     */
+    public Map<String, Object> checkoutVcsRepositoriesDetailed(String basePath, String ref, String title,
+                                                               boolean checkoutGit, boolean switchSvn,
+                                                               GitUtil.CheckoutOptions options) {
+        return checkoutVcsRepositories(basePath, ref, title, checkoutGit, switchSvn, options);
+    }
+
+    private Map<String, Object> checkoutVcsRepositories(String basePath, String ref, String title,
+                                                        boolean checkoutGit, boolean switchSvn,
+                                                        GitUtil.CheckoutOptions options) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        long t0 = System.currentTimeMillis();
         if (Strings.isBlank(basePath)) {
-            System.out.println("基础路径不能为空！");
-            return;
+            throw new IllegalArgumentException("基础路径不能为空");
         }
         if (Strings.isBlank(ref)) {
-            System.out.println("分支/目标不能为空！");
-            return;
+            throw new IllegalArgumentException("分支/目标不能为空");
         }
         if (!basePath.endsWith(File.separator)) {
             basePath += File.separator;
         }
         File baseDir = new File(basePath);
         if (!baseDir.exists() || !baseDir.isDirectory()) {
-            System.out.println("基础路径不存在或不是目录：" + basePath);
-            return;
+            throw new IllegalArgumentException("基础路径不存在或不是目录：" + basePath);
         }
 
-        System.out.println("========== 开始批量切换 " + title + " → " + ref + " ==========");
+        GitUtil.CheckoutOptions opt = options == null ? GitUtil.CheckoutOptions.defaults() : options;
+        System.out.println("========== 开始批量切换 " + title + " → " + ref
+                + "（fetchTags=" + opt.fetchTags
+                + ", pullAfter=" + opt.pullAfter
+                + ", updateSubmodules=" + opt.updateSubmodules + "） ==========");
         List<String> gitPaths = new ArrayList<>();
         List<String> svnPaths = new ArrayList<>();
         if (checkoutGit) {
@@ -847,34 +909,95 @@ public class HundsunServiceImpl {
             findSvnRepositories(baseDir, svnPaths, 5, 0);
         }
         if (gitPaths.isEmpty() && svnPaths.isEmpty()) {
-            System.out.println("未找到任何" + title + "仓库！");
-            return;
+            summary.put("total", 0);
+            summary.put("ok", 0);
+            summary.put("skipped", 0);
+            summary.put("failed", 0);
+            summary.put("items", new ArrayList<>());
+            summary.put("totalMs", System.currentTimeMillis() - t0);
+            summary.put("message", "未找到任何" + title + "仓库");
+            return summary;
         }
 
-        ArrayBlockingQueue<Runnable> blockingQueue = new ArrayBlockingQueue<>(50);
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(5, 10, 30, TimeUnit.SECONDS, blockingQueue);
-        List<CompletableFuture<Boolean>> futures = new ArrayList<>();
+        ArrayBlockingQueue<Runnable> blockingQueue = new ArrayBlockingQueue<>(200);
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(4, 8, 30, TimeUnit.SECONDS, blockingQueue);
+        List<CompletableFuture<Map<String, Object>>> futures = new ArrayList<>();
         String target = ref.trim();
         for (String repoPath : gitPaths) {
-            futures.add(CompletableFuture.supplyAsync(() -> GitUtil.gitCheckout(repoPath, target), executor));
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> GitUtil.gitCheckoutWithResult(repoPath, target, opt), executor));
         }
         for (String repoPath : svnPaths) {
-            futures.add(CompletableFuture.supplyAsync(() -> SvnUtil.svnSwitch(repoPath, target), executor));
+            futures.add(CompletableFuture.supplyAsync(() -> {
+                long started = System.currentTimeMillis();
+                boolean ok = SvnUtil.svnSwitch(repoPath, target);
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("success", ok);
+                row.put("skipped", false);
+                row.put("status", ok ? "ok" : "failed");
+                row.put("vcsType", "svn");
+                row.put("repoPath", repoPath);
+                row.put("name", new File(repoPath).getName());
+                row.put("ref", target);
+                row.put("branch", SvnUtil.currentBranch(repoPath));
+                row.put("message", ok ? "svn switch 成功" : "svn switch 失败");
+                Map<String, Object> timings = new LinkedHashMap<>();
+                timings.put("totalMs", System.currentTimeMillis() - started);
+                row.put("timings", timings);
+                return row;
+            }, executor));
         }
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        long successCount = futures.stream().filter(f -> {
+        List<Map<String, Object>> items = new ArrayList<>();
+        int ok = 0;
+        int skipped = 0;
+        int failed = 0;
+        for (CompletableFuture<Map<String, Object>> future : futures) {
             try {
-                return Boolean.TRUE.equals(f.get());
+                Map<String, Object> row = future.get();
+                if (row.get("name") == null && row.get("repoPath") != null) {
+                    row.put("name", new File(String.valueOf(row.get("repoPath"))).getName());
+                }
+                if (row.get("vcsType") == null) {
+                    row.put("vcsType", "git");
+                }
+                items.add(row);
+                if (Boolean.TRUE.equals(row.get("skipped"))) {
+                    skipped++;
+                    ok++;
+                } else if (Boolean.TRUE.equals(row.get("success"))) {
+                    ok++;
+                } else {
+                    failed++;
+                }
             } catch (Exception e) {
-                return false;
+                failed++;
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("success", false);
+                row.put("status", "failed");
+                row.put("message", e.getMessage());
+                items.add(row);
             }
-        }).count();
+        }
         executor.shutdown();
+        long totalMs = System.currentTimeMillis() - t0;
         int total = gitPaths.size() + svnPaths.size();
-        System.out.println("========== 批量切换完成 ==========");
+        System.out.println("========== 批量切换完成，总耗时 " + totalMs + " ms ==========");
         System.out.println("总计：" + total + "（Git=" + gitPaths.size() + "，SVN=" + svnPaths.size() + "）");
-        System.out.println("成功：" + successCount);
-        System.out.println("失败/跳过：" + (total - successCount));
+        System.out.println("成功：" + ok + "（含跳过 " + skipped + "），失败：" + failed);
+
+        summary.put("total", total);
+        summary.put("ok", ok);
+        summary.put("skipped", skipped);
+        summary.put("failed", failed);
+        summary.put("gitCount", gitPaths.size());
+        summary.put("svnCount", svnPaths.size());
+        summary.put("ref", target);
+        summary.put("totalMs", totalMs);
+        summary.put("items", items);
+        summary.put("message", "完成：成功 " + ok + "（跳过 " + skipped + "），失败 " + failed
+                + "，总耗时 " + totalMs + " ms");
+        return summary;
     }
 
     /**

@@ -36,4 +36,18 @@ public class GitUtilTest {
         GitUtil.getSubModuleClone("https://example.com/x.git", bizDir.getAbsolutePath(), "console-fina-vue");
         Assert.assertFalse(new File(bizDir, "console-fina-vue").exists());
     }
+
+    @Test
+    public void normalizeAndTagIntent() {
+        Assert.assertEquals("IFMS6.0V202607.04.000",
+                GitUtil.normalizeCheckoutRef("tag/IFMS6.0V202607.04.000"));
+        Assert.assertEquals("IFMS6.0V202607.04.000",
+                GitUtil.normalizeCheckoutRef("refs/tags/IFMS6.0V202607.04.000"));
+        Assert.assertTrue(GitUtil.isTagIntent("tag/IFMS6.0V202607.04.000"));
+        Assert.assertFalse(GitUtil.isTagIntent("hotfix/IFMS6.0V202607.00.005"));
+        Assert.assertTrue(GitUtil.alreadyOnRef("hotfix/IFMS6.0V202607.00.005",
+                "IFMS6.0V202607.00.005", "IFMS6.0V202607.00.005"));
+        Assert.assertTrue(GitUtil.alreadyOnRef("IFMS6.0V202607.04.000-12-ga2e3c2931",
+                "IFMS6.0V202607.04.000", "tag/IFMS6.0V202607.04.000"));
+    }
 }

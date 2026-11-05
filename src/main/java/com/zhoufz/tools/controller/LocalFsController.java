@@ -31,11 +31,15 @@ public class LocalFsController {
     @GetMapping("/roots")
     public Result<List<Map<String, String>>> roots() {
         List<Map<String, String>> list = new ArrayList<>();
-        addRoot(list, "用户目录", System.getProperty("user.home"));
-        addRoot(list, "恒生根", "/Users/zhoufz/hundsun");
+        addRoot(list, "git提交", "/Users/zhoufz/hundsun/lcpt60/commitGit");
+        addRoot(list, "git", "/Users/zhoufz/hundsun/lcpt60/git");
+        addRoot(list, "工程项目", "/Users/zhoufz/hundsun/lcpt60/project");
+        addRoot(list, "svn", "/Users/zhoufz/hundsun/lcpt60/svn/Sources");
+        addRoot(list, "svn小包分支", "/Users/zhoufz/hundsun/lcpt60/svn/branch");
         addRoot(list, "Sources", "/Users/zhoufz/hundsun/lcpt60/git/Sources");
         addRoot(list, "工具台", "/Users/zhoufz/hundsun/tools");
-        addRoot(list, "系统根", "/");
+        addRoot(list, "恒生根", "/Users/zhoufz/hundsun");
+        addRoot(list, "用户目录", System.getProperty("user.home"));
         return Result.success("常用根目录", list);
     }
 

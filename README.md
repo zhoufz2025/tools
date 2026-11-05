@@ -52,6 +52,7 @@ Vite 已将 `/hundsun` 代理到 `http://127.0.0.1:18080`，前端请求同源�
 - `/git` — Git / SVN 批量更新、切换分支；旧「代码替换」已废弃
 - `/svn-xiaobao` — SVN 小包拉包（按 branches/fix 叶子 checkout 业务代码 / spsql 版本 / 前端 / 低柜）
 - `/package-copy` — 大包→小包复制（源根 A + 目标根 B + 文件列表；结构风险需强制确认；SQL 可按 taskId 追加）
+- `/maven-install-product` — 产品包 Install（按工程包 GAV 版本：清空本地目标目录 → versions:set → clean install → 改回原版本）
 - `/config` — 配置备份/还原
 
 ## 说明

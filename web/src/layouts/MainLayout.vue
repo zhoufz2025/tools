@@ -29,6 +29,10 @@
           <el-icon><CopyDocument /></el-icon>
           <span>大包→小包复制</span>
         </el-menu-item>
+        <el-menu-item index="/maven-install-product">
+          <el-icon><Box /></el-icon>
+          <span>产品包 Install</span>
+        </el-menu-item>
         <el-menu-item index="/config">
           <el-icon><FolderOpened /></el-icon>
           <span>配置备份/还原</span>
@@ -41,7 +45,11 @@
         <span class="hint">API 代理 → http://127.0.0.1:18080</span>
       </el-header>
       <el-main class="main">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <keep-alive>
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </el-main>
     </el-container>
   </el-container>
@@ -50,7 +58,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Coin, Document, Refresh, FolderOpened, Download, CopyDocument } from '@element-plus/icons-vue'
+import { Coin, Document, Refresh, FolderOpened, Download, CopyDocument, Box } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const active = computed(() => route.path)

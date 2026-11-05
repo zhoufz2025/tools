@@ -14,7 +14,10 @@ export default defineConfig({
     proxy: {
       '/hundsun': {
         target: 'http://127.0.0.1:18080',
-        changeOrigin: true
+        changeOrigin: true,
+        // product-install 的 mvn 可能跑很久，避免代理先断开造成前端一直转圈
+        timeout: 35 * 60 * 1000,
+        proxyTimeout: 35 * 60 * 1000
       }
     }
   }

@@ -38,6 +38,12 @@ const routes = [
         meta: { title: '大包→小包复制' }
       },
       {
+        path: 'maven-install-product',
+        name: 'mavenInstallProduct',
+        component: () => import('@/views/MavenInstallProduct.vue'),
+        meta: { title: '产品包 Install（对齐工程包版本）' }
+      },
+      {
         path: 'config',
         name: 'config',
         component: () => import('@/views/ConfigBackup.vue'),

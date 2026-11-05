@@ -25,7 +25,7 @@
         <el-select
           v-model="quickRoot"
           placeholder="常用目录"
-          style="width: 160px"
+          style="width: 180px"
           @change="onQuickRoot"
         >
           <el-option

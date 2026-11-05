@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -154,11 +155,24 @@ public class GitUtil {
      * 执行 git pull 更新指定目录的仓库。
      * <p>首次 pull 失败时（常见于本地改动与远程冲突），自动执行
      * {@code stash → pull → stash pop}；二次 pull 仍失败会尽量 stash pop 还原本地改动。</p>
+     * <p>{@code stash pop} 若产生冲突：一律以 <b>stash 本地版</b>为准
+     *（{@code git checkout --theirs}），再 add 并 drop 该 stash，避免留下冲突标记。</p>
      *
      * @param repoDir 仓库目录路径
      * @return 是否更新成功（以 pull 是否成功为准；stash pop 冲突会打日志但仍可能返回 true）
      */
+    /**
+     * git pull；若仓库含 submodule，默认也会 recurse + foreach pull（兼容旧调用）。
+     * 前端 HUI 等场景请用 {@link #gitPull(String, boolean)} 并传 {@code updateSubmodules=false}。
+     */
     public static boolean gitPull(String repoDir) {
+        return gitPull(repoDir, true);
+    }
+
+    /**
+     * @param updateSubmodules false 时仅 pull 当前仓，不 --recurse-submodules、不 foreach pull
+     */
+    public static boolean gitPull(String repoDir, boolean updateSubmodules) {
         try {
             File dir = new File(repoDir);
             if (!dir.exists() || !dir.isDirectory()) {
@@ -170,14 +184,16 @@ public class GitUtil {
                 return false;
             }
 
-            boolean hasSubmodules = hasSubmodules(repoDir);
-            if (hasSubmodules) {
+            boolean pullSubs = updateSubmodules && hasSubmodules(repoDir);
+            if (hasSubmodules(repoDir) && !updateSubmodules) {
+                System.out.println("======开始更新（跳过 submodules）：" + repoDir);
+            } else if (pullSubs) {
                 System.out.println("======开始更新（包含submodules）：" + repoDir);
             } else {
                 System.out.println("======开始更新：" + repoDir);
             }
 
-            if (doGitPullOnce(dir, hasSubmodules)) {
+            if (doGitPullOnce(dir, pullSubs)) {
                 return true;
             }
 
@@ -187,19 +203,19 @@ public class GitUtil {
                 return false;
             }
 
-            boolean pulled = doGitPullOnce(dir, hasSubmodules);
+            boolean pulled = doGitPullOnce(dir, pullSubs);
             boolean popped = stashPopAfterPull(dir);
             if (pulled) {
                 if (!popped) {
-                    System.out.println("[WARN] pull 已成功，但 stash pop 失败（可能有冲突），请手工处理：" + repoDir);
+                    System.out.println("[WARN] pull 已成功，但 stash 还原仍失败，请检查 git status / stash list：" + repoDir);
                 } else {
-                    System.out.println("Git pull（经 stash）" + repoDir + " 成功！");
+                    System.out.println("Git pull（经 stash，冲突已按本地 stash 版处理）" + repoDir + " 成功！");
                 }
                 return true;
             }
             System.out.println("stash 后再次 pull 仍失败：" + repoDir);
             if (!popped) {
-                System.out.println("[WARN] stash pop 也失败，本地改动可能仍在 stash 中，请检查 git stash list：" + repoDir);
+                System.out.println("[WARN] stash pop/冲突处理失败，本地改动可能仍在 stash 中，请检查 git stash list：" + repoDir);
             }
             return false;
         } catch (Exception e) {
@@ -210,17 +226,17 @@ public class GitUtil {
     }
 
     /**
-     * 执行一次 pull（含 submodule 后续更新），不自动 stash。
+     * 执行一次 pull；{@code pullSubmodules=true} 时带 submodule 后续更新。
      */
-    private static boolean doGitPullOnce(File dir, boolean hasSubmodules) throws Exception {
-        ProcessBuilder pb = hasSubmodules
+    private static boolean doGitPullOnce(File dir, boolean pullSubmodules) throws Exception {
+        ProcessBuilder pb = pullSubmodules
                 ? gitProcess(dir, false, "pull", "--recurse-submodules")
                 : gitProcess(dir, false, "pull");
         Process process = pb.start();
         printProcessOutput(process);
         int exitCode = process.waitFor();
 
-        if (exitCode == 0 && hasSubmodules) {
+        if (exitCode == 0 && pullSubmodules) {
             System.out.println("------检查并更新 submodules：" + dir.getAbsolutePath());
             ProcessBuilder pb2 = gitProcess(dir, false,
                     "submodule", "foreach", resolveGitExecutable(), "pull", "origin", "HEAD");
@@ -303,11 +319,76 @@ public class GitUtil {
         Process process = pb.start();
         printProcessOutput(process);
         int code = process.waitFor();
-        if (code != 0) {
-            System.out.println("stash pop 失败，退出码：" + code);
+        if (code == 0) {
+            return true;
+        }
+        System.out.println("stash pop 失败，退出码：" + code + "，尝试按「stash 本地版」自动解决冲突…");
+        return resolveStashConflictsPreferStash(dir);
+    }
+
+    /**
+     * stash apply/pop 冲突时：stage2=Updated upstream(HEAD)，stage3=Stashed changes。
+     * 用户约定冲突一律以 stash 为准 → {@code checkout --theirs}。
+     */
+    private static boolean resolveStashConflictsPreferStash(File dir) throws Exception {
+        List<String> unmerged = listUnmergedFiles(dir);
+        if (unmerged.isEmpty()) {
+            System.out.println("没有未合并文件，无法自动按 stash 解决：" + dir.getAbsolutePath());
             return false;
         }
+        System.out.println("冲突文件 " + unmerged.size() + " 个，全部取 Stashed changes（--theirs）：");
+        for (String path : unmerged) {
+            System.out.println("  - " + path);
+            int checkoutCode = runGit(dir, "git", "checkout", "--theirs", "--", path);
+            if (checkoutCode != 0) {
+                System.out.println("[WARN] checkout --theirs 失败：" + path);
+                return false;
+            }
+            int addCode = runGit(dir, "git", "add", "--", path);
+            if (addCode != 0) {
+                System.out.println("[WARN] git add 失败：" + path);
+                return false;
+            }
+        }
+        List<String> still = listUnmergedFiles(dir);
+        if (!still.isEmpty()) {
+            System.out.println("[WARN] 仍有未合并文件：" + still);
+            return false;
+        }
+        // pop 冲突时 stash 条目不会自动删除，需手动 drop
+        System.out.println("------ git stash drop（冲突已按本地 stash 解决）：" + dir.getAbsolutePath());
+        int dropCode = runGit(dir, "git", "stash", "drop");
+        if (dropCode != 0) {
+            System.out.println("[WARN] stash drop 失败，请检查 git stash list：" + dir.getAbsolutePath());
+            // 工作区已按 stash 修好，仍视为成功
+        }
+        System.out.println("stash 冲突已按本地版解决：" + dir.getAbsolutePath());
         return true;
+    }
+
+    private static List<String> listUnmergedFiles(File dir) throws Exception {
+        ProcessBuilder pb = gitProcess(dir, false, "diff", "--name-only", "--diff-filter=U");
+        Process process = pb.start();
+        List<String> files = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String path = line.trim();
+                if (!path.isEmpty()) {
+                    files.add(path);
+                }
+            }
+        }
+        // 读完 stdout 后再排空 stderr，避免阻塞
+        try (BufferedReader err = new BufferedReader(
+                new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+            while (err.readLine() != null) {
+                // ignore
+            }
+        }
+        process.waitFor();
+        return files;
     }
 
     private static int stashListSize(File dir) throws Exception {
@@ -325,68 +406,245 @@ public class GitUtil {
     }
 
     /**
-     * 在指定仓库目录执行 git fetch 后切换到分支或标签。
-     * <p>尝试顺序：本地或已有引用 {@code git checkout ref}；{@code origin/ref}；
-     * 再在远程分支中匹配「路径以 {@code /ref} 结尾」或全名等于 {@code ref}（例如 {@code hotfix/IFMS6.0V202607.00.005}）；
-     * 最后尝试标签 {@code refs/tags/ref}。匹配多条时优先 {@code hotfix/}、{@code release/} 等常见前缀。</p>
-     * <p>在命名分支上切换成功后，会执行一次 {@link #gitPull} 与远程对齐；分离 HEAD（如标签）则跳过 pull。</p>
+     * Git 切换分支选项。默认走轻量路径：不拉全量 tags、切换后不 pull、不递归更新 submodule。
+     */
+    public static class CheckoutOptions {
+        /** 是否额外拉取 tags（仅切 tag / submodule 钉版本时需要） */
+        public boolean fetchTags = false;
+        /** 切换成功后是否再 git pull（默认 false：fetch+checkout -B 已对齐） */
+        public boolean pullAfter = false;
+        /** 是否 submodule update --init --recursive（默认 false） */
+        public boolean updateSubmodules = false;
+        /** 已在目标分支/标签时跳过（默认 true） */
+        public boolean skipIfAlreadyOnRef = true;
+
+        public static CheckoutOptions defaults() {
+            return new CheckoutOptions();
+        }
+    }
+
+    /**
+     * 使用默认轻量选项切换分支/标签。
      *
-     * @param repoDir 仓库根目录
-     * @param ref      分支名、标签名或版本片段，例如 IFMS6.0V202607.00.005
-     * @return 是否成功
+     * @see #gitCheckoutWithResult(String, String, CheckoutOptions)
      */
     public static boolean gitCheckout(String repoDir, String ref) {
+        Map<String, Object> result = gitCheckoutWithResult(repoDir, ref, CheckoutOptions.defaults());
+        return Boolean.TRUE.equals(result.get("success"));
+    }
+
+    /**
+     * 在指定仓库切换到分支或标签（优化版）。
+     * <p>默认：先本地 checkout → 已有 origin 跟踪分支 → 单 ref fetch（--no-tags）→ 再匹配 hotfix/release；
+     * 仅在显式勾选或目标明确是 tag 时才拉标签。默认不 pull、不 recursive submodule。</p>
+     *
+     * @return success/skipped/status/message/branch/timings 等
+     */
+    public static Map<String, Object> gitCheckoutWithResult(String repoDir, String ref, CheckoutOptions options) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        Map<String, Object> timings = new LinkedHashMap<>();
+        result.put("timings", timings);
+        result.put("repoPath", repoDir);
+        result.put("ref", ref);
+        long t0 = System.currentTimeMillis();
+        CheckoutOptions opt = options == null ? CheckoutOptions.defaults() : options;
         try {
             File dir = new File(repoDir);
             if (!dir.exists() || !dir.isDirectory()) {
-                System.out.println("目录不存在：" + repoDir);
-                return false;
+                return failCheckout(result, timings, t0, "目录不存在：" + repoDir);
             }
             if (!isValidGitRepository(repoDir)) {
-                System.out.println("不是有效的git仓库（无远程分支）：" + repoDir);
-                return false;
+                return failCheckout(result, timings, t0, "不是有效的git仓库：" + repoDir);
             }
 
-            System.out.println("====== git fetch origin（含 tags）：" + repoDir);
-            int fetchCode = runGit(dir, "git", "fetch", "origin", "--prune", "--tags");
-            if (fetchCode != 0) {
-                System.out.println("git fetch 失败，退出码：" + fetchCode);
-                return false;
+            String rawRef = ref == null ? "" : ref.trim();
+            if (rawRef.isEmpty()) {
+                return failCheckout(result, timings, t0, "分支/标签不能为空");
+            }
+            boolean tagIntent = isTagIntent(rawRef);
+            String normalized = normalizeCheckoutRef(rawRef);
+            result.put("normalizedRef", normalized);
+            result.put("tagIntent", tagIntent);
+
+            String current = currentBranch(repoDir);
+            result.put("branchBefore", current);
+            if (opt.skipIfAlreadyOnRef && alreadyOnRef(current, normalized, rawRef)) {
+                result.put("success", true);
+                result.put("skipped", true);
+                result.put("status", "skipped");
+                result.put("message", "已在目标：" + current);
+                result.put("branch", current);
+                timings.put("totalMs", System.currentTimeMillis() - t0);
+                System.out.println("[checkout] 跳过（已在目标）" + repoDir + " → " + current);
+                return result;
             }
 
-            int checkoutCode = tryCheckoutRef(dir, ref);
+            // 1) 先本地尝试（零网络）
+            long tLocal = System.currentTimeMillis();
+            int checkoutCode = tryCheckoutRef(dir, normalized);
+            timings.put("localCheckoutMs", System.currentTimeMillis() - tLocal);
+
+            // 2) 本地失败：按需窄 fetch，再试
             if (checkoutCode != 0) {
-                System.out.println("------ 以下为 origin 远程分支（按名称排序，便于核对命名规则）：");
-                runGit(dir, "git", "branch", "-r", "--sort=refname");
-                System.out.println("git checkout 失败，退出码：" + checkoutCode);
-                return false;
+                long tFetch = System.currentTimeMillis();
+                boolean needTags = opt.fetchTags || tagIntent;
+                fetchForCheckout(dir, normalized, needTags);
+                timings.put("fetchMs", System.currentTimeMillis() - tFetch);
+
+                long tRetry = System.currentTimeMillis();
+                checkoutCode = tryCheckoutRef(dir, normalized);
+                timings.put("retryCheckoutMs", System.currentTimeMillis() - tRetry);
+            } else {
+                timings.put("fetchMs", 0L);
             }
 
-            if (hasSubmodules(repoDir)) {
+            if (checkoutCode != 0) {
+                System.out.println("------ checkout 失败，列出 origin 远程分支便于核对：" + repoDir);
+                runGit(dir, "git", "branch", "-r", "--sort=refname");
+                return failCheckout(result, timings, t0, "git checkout 失败，退出码=" + checkoutCode);
+            }
+
+            if (opt.updateSubmodules && hasSubmodules(repoDir)) {
+                long tSub = System.currentTimeMillis();
                 System.out.println("------ git submodule update --init --recursive：" + repoDir);
                 int subCode = runGit(dir, "git", "submodule", "update", "--init", "--recursive");
+                timings.put("submoduleMs", System.currentTimeMillis() - tSub);
                 if (subCode != 0) {
-                    System.out.println("submodule 更新失败，退出码：" + subCode);
-                    return false;
-                }
-            }
-
-            if (isOnNamedBranch(dir)) {
-                System.out.println("------ 切换分支后 git pull 同步远程：" + repoDir);
-                if (!gitPull(repoDir)) {
-                    return false;
+                    return failCheckout(result, timings, t0, "submodule 更新失败，退出码=" + subCode);
                 }
             } else {
-                System.out.println("------ 当前为分离 HEAD（多为标签检出），跳过 git pull");
+                timings.put("submoduleMs", 0L);
+                if (hasSubmodules(repoDir) && !opt.updateSubmodules) {
+                    System.out.println("------ 跳过 submodule 更新（未勾选）：" + repoDir);
+                }
             }
 
-            System.out.println("Git checkout " + ref + " @ " + repoDir + " 成功！");
-            return true;
+            if (opt.pullAfter && isOnNamedBranch(dir)) {
+                long tPull = System.currentTimeMillis();
+                System.out.println("------ 切换后 git pull：" + repoDir);
+                boolean pulled = gitPull(repoDir, opt.updateSubmodules);
+                timings.put("pullMs", System.currentTimeMillis() - tPull);
+                if (!pulled) {
+                    return failCheckout(result, timings, t0, "切换成功但后续 git pull 失败");
+                }
+            } else {
+                timings.put("pullMs", 0L);
+                if (!opt.pullAfter) {
+                    System.out.println("------ 跳过 git pull（未勾选）：" + repoDir);
+                }
+            }
+
+            String after = currentBranch(repoDir);
+            result.put("success", true);
+            result.put("skipped", false);
+            result.put("status", "ok");
+            result.put("message", "切换成功");
+            result.put("branch", after);
+            timings.put("totalMs", System.currentTimeMillis() - t0);
+            System.out.println("Git checkout " + normalized + " @ " + repoDir
+                    + " 成功！耗时 " + timings.get("totalMs") + " ms");
+            return result;
         } catch (Exception e) {
-            System.out.println("Git checkout " + repoDir + " 发生异常：");
             e.printStackTrace();
+            return failCheckout(result, timings, t0, "异常：" + e.getMessage());
+        }
+    }
+
+    private static Map<String, Object> failCheckout(Map<String, Object> result, Map<String, Object> timings,
+                                                    long startedAt, String message) {
+        System.out.println("[checkout] 失败：" + message);
+        result.put("success", false);
+        result.put("skipped", false);
+        result.put("status", "failed");
+        result.put("message", message);
+        timings.put("totalMs", System.currentTimeMillis() - startedAt);
+        return result;
+    }
+
+    /** 去掉 tag/、tags/、refs/tags/ 前缀，得到真实 ref 名。 */
+    public static String normalizeCheckoutRef(String ref) {
+        String r = ref.trim();
+        if (r.regionMatches(true, 0, "refs/tags/", 0, "refs/tags/".length())) {
+            return r.substring("refs/tags/".length());
+        }
+        if (r.regionMatches(true, 0, "tags/", 0, "tags/".length())) {
+            return r.substring("tags/".length());
+        }
+        if (r.regionMatches(true, 0, "tag/", 0, "tag/".length())) {
+            return r.substring("tag/".length());
+        }
+        return r;
+    }
+
+    /** 用户明确按 tag 意图填写（带 tag/ 等前缀）。 */
+    public static boolean isTagIntent(String ref) {
+        String r = ref.trim();
+        return r.regionMatches(true, 0, "tag/", 0, 4)
+                || r.regionMatches(true, 0, "tags/", 0, 5)
+                || r.regionMatches(true, 0, "refs/tags/", 0, 10);
+    }
+
+    public static boolean alreadyOnRef(String current, String normalized, String rawRef) {
+        if (current == null || current.isEmpty() || normalized == null || normalized.isEmpty()) {
             return false;
         }
+        if (current.equals(normalized) || current.equals(rawRef)) {
+            return true;
+        }
+        // describe 结果：tag/xxx 或 xxx-12-gabcdef
+        if (current.equals("tag/" + normalized) || current.startsWith(normalized + "-")) {
+            return true;
+        }
+        if (current.endsWith("/" + normalized)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 窄 fetch：只拉需要的 branch/tag，默认 --no-tags，避免全量 tags。
+     */
+    private static void fetchForCheckout(File dir, String normalized, boolean fetchTags) throws Exception {
+        System.out.println("====== 窄 fetch（" + (fetchTags ? "含目标 tag" : "无 tags") + "）：" + dir.getPath()
+                + " ref=" + normalized);
+
+        // 1) 直接按用户给的名字当分支拉
+        if (fetchSingleBranch(dir, normalized) == 0) {
+            return;
+        }
+
+        // 2) 无斜杠时尝试常见发布前缀（hotfix/版本 等）
+        if (!normalized.contains("/")) {
+            String[] prefixes = {"hotfix/", "release/", "bugfix/", "patch/", "feature/"};
+            for (String prefix : prefixes) {
+                if (fetchSingleBranch(dir, prefix + normalized) == 0) {
+                    return;
+                }
+            }
+        }
+
+        // 3) tag：仅显式需要时
+        if (fetchTags) {
+            System.out.println("------ fetch 单个 tag：" + normalized);
+            int tagCode = runGit(dir, "git", "fetch", "origin", "tag", normalized, "--no-tags");
+            if (tagCode == 0) {
+                return;
+            }
+            runGit(dir, "git", "fetch", "origin",
+                    "refs/tags/" + normalized + ":refs/tags/" + normalized, "--no-tags");
+            return;
+        }
+
+        // 4) 兜底：全量分支、仍不拉 tags（比旧逻辑 --tags 轻得多）
+        System.out.println("------ 兜底 fetch origin --prune --no-tags：" + dir.getPath());
+        runGit(dir, "git", "fetch", "origin", "--prune", "--no-tags");
+    }
+
+    private static int fetchSingleBranch(File dir, String branchName) throws Exception {
+        System.out.println("------ fetch 单分支：" + branchName);
+        return runGit(dir, "git", "fetch", "origin",
+                "refs/heads/" + branchName + ":refs/remotes/origin/" + branchName,
+                "--prune", "--no-tags");
     }
 
     /**
